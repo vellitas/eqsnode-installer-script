@@ -323,10 +323,10 @@ download_release_binaries() {
 
   [[ "${version}" = "auto" ]] && api_url="${api_url}/latest" || api_url="${api_url}/tags/${version}"
 
-  echo -e "\n\033[1mFetching XEQM release information from GitHub...\033[0m"
+  echo -e "\n\033[1mFetching XEQM release information from GitHub...\033[0m" >&2
   local release_info
   release_info="$(wget --quiet -O - "${api_url}" 2>/dev/null)" || {
-    echo -e "\033[0;31merror\033[0m: Could not fetch release info. Check network connectivity."
+    echo -e "\033[0;31merror\033[0m: Could not fetch release info. Check network connectivity." >&2
     rm -rf "${tmp_dir}"; exit 1
   }
 
@@ -341,17 +341,17 @@ download_release_binaries() {
     | grep -i 'linux' | head -1 | grep -o 'https://[^"]*')"
 
   if [[ -z "${download_url}" ]]; then
-    echo -e "\033[0;31merror\033[0m: No Linux binary found in GitHub release assets. Use --copy-binaries to specify a local path, or choose compile."
+    echo -e "\033[0;31merror\033[0m: No Linux binary found in GitHub release assets. Use --copy-binaries to specify a local path, or choose compile." >&2
     rm -rf "${tmp_dir}"; exit 1
   fi
 
-  echo -e "  Downloading: ${download_url##*/}"
+  echo -e "  Downloading: ${download_url##*/}" >&2
   wget --progress=bar:force:noscroll -O "${tmp_dir}/release.archive" "${download_url}" || {
-    echo -e "\033[0;31merror\033[0m: Download failed."
+    echo -e "\033[0;31merror\033[0m: Download failed." >&2
     rm -rf "${tmp_dir}"; exit 1
   }
 
-  echo -e "\n\033[1mExtracting binaries...\033[0m"
+  echo -e "\n\033[1mExtracting binaries...\033[0m" >&2
   local archive_type
   archive_type="$(file "${tmp_dir}/release.archive" | grep -o 'Zip\|gzip\|bzip2\| XZ')"
   case "${archive_type}" in
@@ -359,14 +359,14 @@ download_release_binaries() {
     *gzip*)  tar -xzf "${tmp_dir}/release.archive" -C "${tmp_dir}" ;;
     *bzip2*) tar -xjf "${tmp_dir}/release.archive" -C "${tmp_dir}" ;;
     *XZ*)    tar -xJf "${tmp_dir}/release.archive" -C "${tmp_dir}" ;;
-    *)       echo -e "\033[0;31merror\033[0m: Unknown archive format."; rm -rf "${tmp_dir}"; exit 1 ;;
+    *)       echo -e "\033[0;31merror\033[0m: Unknown archive format." >&2; rm -rf "${tmp_dir}"; exit 1 ;;
   esac
   rm -f "${tmp_dir}/release.archive"
 
   local daemon_path
   daemon_path="$(find "${tmp_dir}" -name "daemon" -type f | head -1)"
   if [[ -z "${daemon_path}" ]]; then
-    echo -e "\033[0;31merror\033[0m: daemon binary not found in downloaded release."
+    echo -e "\033[0;31merror\033[0m: daemon binary not found in downloaded release." >&2
     rm -rf "${tmp_dir}"; exit 1
   fi
 
