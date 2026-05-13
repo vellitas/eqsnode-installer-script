@@ -262,12 +262,12 @@ prompt_menu() {
   done
   echo ""
 
-  local choice
+  local pm__input
   while true; do
-    read -rp "  Choice [${default}]: " choice
-    choice="${choice:-${default}}"
-    if [[ "${choice}" =~ ^[0-9]+$ && "${choice}" -ge 1 && "${choice}" -le "${#options[@]}" ]]; then
-      pm__result="${choice}"
+    read -rp "  Choice [${default}]: " pm__input
+    pm__input="${pm__input:-${default}}"
+    if [[ "${pm__input}" =~ ^[0-9]+$ && "${pm__input}" -ge 1 && "${pm__input}" -le "${#options[@]}" ]]; then
+      pm__result="${pm__input}"
       return 0
     fi
     echo -e "  \033[0;33mPlease enter a number between 1 and ${#options[@]}\033[0m"
