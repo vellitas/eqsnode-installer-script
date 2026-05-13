@@ -122,7 +122,11 @@ set_config_and_execute_info_commands() {
   if [[ "${command_options_set[copy_binaries]}" -eq 1 ]]; then copy_binaries_option_handler "${copy_binaries_option_value}"; fi
   if [[ "${command_options_set[daemon_log_level]}" -eq 1 ]]; then daemon_log_level_option_handler "${daemon_log_level_option_value}"; fi
   if [[ "${command_options_set[git_repository]}" -eq 1 ]]; then git_repository_option_handler "${git_repository_option_value}"; fi
-  if [[ "${command_options_set[open_firewall]}" -eq 1 ]]; then config[open_firewall]=1; fi
+  if [[ "${command_options_set[open_firewall]}" -eq 1 ]]; then
+    config[open_firewall]=1
+  elif [[ "${config[quiet_mode]}" -eq 0 ]]; then
+    prompt_open_firewall
+  fi
 
   # necessary return 0
   return 0
@@ -137,6 +141,19 @@ validate_parsed_command_line_args() {
     "help"
   )
   validate_command_line_option_combinations valid_option_combinations
+}
+
+prompt_open_firewall() {
+  local yn
+  while true; do
+    read -rp $'\n\033[1mOpen firewall ports automatically?\e[0m (recommended) [Y/n]: ' yn
+    yn="${yn:-Y}"
+    case "${yn}" in
+      [Yy]*) config[open_firewall]=1; break ;;
+      [Nn]*) config[open_firewall]=0; break ;;
+      *) echo -e "  \033[0;33mPlease answer Y or N\033[0m" ;;
+    esac
+  done
 }
 
 prompt_nodes_count() {
