@@ -4,7 +4,7 @@ After=network-online.target
 [Service]
 Type=simple
 User=%INSTALL_USERNAME%
-ExecStart=%INSTALL_ROOT%/bin/xeqm-d --non-interactive --service-node --restricted-rpc %PORT_PARAMS%%OPT_PARAMS%
+ExecStart=%INSTALL_ROOT%/bin/xeqm-d --non-interactive --service-node --p2p-bind-ip=0.0.0.0 %PORT_PARAMS%%OPT_PARAMS% --add-priority-node=seed-1.xeqmlabs.com:9230 --add-priority-node=seed-2.xeqmlabs.com:9230 --add-priority-node=seed-3.xeqmlabs.com:9230 --add-priority-node=seed-4.xeqmlabs.com:9230 --add-priority-node=seed-5.xeqmlabs.com:9230
 Restart=always
 RestartSec=30s
 TimeoutSec=120

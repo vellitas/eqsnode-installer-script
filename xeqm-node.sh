@@ -18,11 +18,9 @@ service_name="xeqmnode_${config[running_user]}.service"
 service_file="${install_root_service}/${service_name}"
 readonly service_name service_file
 
-port_params=
-if ! default_ports_configured; then
-  port_params="--p2p-bind-port ${config[p2p_bind_port]} --rpc-bind-port ${config[rpc_bind_port]}"
-fi
-readonly port_params
+quorumnet_port="${config[quorumnet_port]:-$((config[p2p_bind_port] + 2))}"
+port_params="--p2p-bind-port=${config[p2p_bind_port]} --rpc-admin=127.0.0.1:${config[rpc_bind_port]} --quorumnet-port=${quorumnet_port}"
+readonly quorumnet_port port_params
 
 active_user=${USER:=$(/usr/bin/id -run)}
 readonly active_user
