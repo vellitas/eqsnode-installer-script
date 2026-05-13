@@ -23,6 +23,7 @@ config=(
   [daemon_no_fluffy_blocks]=0
   [open_firewall]=0
   [quiet_mode]=0
+  [binary_source]='compile'
 )
 
 typeset -A installer_state
