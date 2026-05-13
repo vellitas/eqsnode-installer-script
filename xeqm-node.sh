@@ -212,38 +212,39 @@ watch_daemon_status() {
   echo -e "\n\033[1mMonitoring blockchain sync progress:\033[0m\n"
   printf "\t(waiting for first status...)\n"
 
-  local last_blocks_done=0
+  local rpc_url="http://127.0.0.1:${config[rpc_bind_port]}/get_info"
+  local last_height=0
   local stall_count=0
-  local max_stall=18  # 18 * 10s = 3 minutes with no progress → assume synced
+  local max_stall=18  # 18 * 10s = 3 minutes with no new blocks → assume synced
 
   while true; do
-    # primary: check journal for sync completion message
+    # primary: journal sync completion message
     if sudo journalctl -u "${service_name}" --no-pager -n 500 2>/dev/null \
         | grep -q "You are now synchronized with the network"; then
       tput cuu1
-      printf "\r\t\033[1;32mBlockchain synchronized.\033[0m%-30s\n" ""
+      printf "\r\t\033[1;32mBlockchain synchronized.\033[0m%-40s\n" ""
       break
     fi
 
-    local blocks_done total_blocks perc
-    read blocks_done total_blocks perc <<< "$(
-      sudo -u "${config[running_user]}" "${install_root_bin_dir}"/bin/xeqm-d status \
-        --p2p-bind-port="${config[p2p_bind_port]}" 2>/dev/null \
-        | grep -o 'Height:.*' \
-        | sed -n 's/^Height: \([0-9]*\)\/\([0-9]*\) (\([0-9.]*\).*/\1 \2 \3/p')"
+    # secondary: HTTP RPC height query
+    local info height target_height
+    info="$(curl -s --connect-timeout 3 "${rpc_url}" 2>/dev/null)"
+    height="$(echo "${info}"    | grep -o '"height":[0-9]*'        | head -1 | cut -d: -f2)"
+    target_height="$(echo "${info}" | grep -o '"target_height":[0-9]*' | head -1 | cut -d: -f2)"
 
-    if [[ "${total_blocks}" =~ ^[0-9]+$ && "${total_blocks}" -ge 1000 ]]; then
+    if [[ "${target_height}" =~ ^[0-9]+$ && "${target_height}" -gt 1000 ]]; then
+      local perc
+      perc="$(bc -l <<< "scale=1; ${height} * 100 / ${target_height}" 2>/dev/null)"
       tput cuu1
-      printf "\r\t(%.01f%%) - %d/%d%-30s\n" "${perc}" "${blocks_done}" "${total_blocks}" ""
+      printf "\r\t(%.01f%%) - %d/%d%-40s\n" "${perc:-0}" "${height:-0}" "${target_height}" ""
 
-      if [[ "${blocks_done}" -ge "${total_blocks}" ]]; then
+      if [[ "${height}" -ge "${target_height}" ]]; then
         tput cuu1
-        printf "\r\t\033[1;32mBlockchain synchronized.\033[0m%-30s\n" ""
+        printf "\r\t\033[1;32mBlockchain synchronized.\033[0m%-40s\n" ""
         break
       fi
 
-      # stall detection: no new blocks for max_stall intervals
-      if [[ "${blocks_done}" -eq "${last_blocks_done}" ]]; then
+      if [[ "${height}" -eq "${last_height}" ]]; then
         stall_count=$((stall_count + 1))
         if [[ "${stall_count}" -ge "${max_stall}" ]]; then
           tput cuu1
@@ -252,7 +253,7 @@ watch_daemon_status() {
         fi
       else
         stall_count=0
-        last_blocks_done="${blocks_done}"
+        last_height="${height}"
       fi
     fi
 

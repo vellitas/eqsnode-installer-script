@@ -476,7 +476,7 @@ copy_blockchain_option_handler() {
         if [[ "${idx}" -eq 1 ]]; then
             config["snode${idx}__copy_blockchain"]="no"
         else
-            config["snode${idx}__copy_blockchain"]="/home/${config["snode1__running_user"]}/.equilibria"
+            config["snode${idx}__copy_blockchain"]="/home/${config["snode1__running_user"]}/.xeqmlabs"
         fi
         idx=$((idx + 1))
       done
@@ -796,7 +796,7 @@ generate_node_config() {
 
 copy_blockchain_to_user_home_if_needed() {
   local -n cbtuhin__node_config_ref="$1"
-  local target_dir="/home/${cbtuhin__node_config_ref[running_user]}/.equilibria"
+  local target_dir="/home/${cbtuhin__node_config_ref[running_user]}/.xeqmlabs"
   local blockchain_value="${cbtuhin__node_config_ref[copy_blockchain]}"
 
   if [[ "${blockchain_value}" = "bootstrap" ]]; then
@@ -908,7 +908,7 @@ Options:
 
                                         Examples: --copy-blockchain bootstrap
                                                   --copy-blockchain auto
-                                                  --copy-blockchain /home/snode/.equilibria
+                                                  --copy-blockchain /home/snode1/.xeqmlabs
                                                   --copy-blockchain no
                                                   --copy-blockchain no,auto
 

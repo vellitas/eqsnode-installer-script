@@ -35,7 +35,7 @@ discover_biggest_blockchain() {
 
   for username in "${daemon_users[@]}"
   do
-    blockchain_root="/home/${username}/.equilibria"
+    blockchain_root="/home/${username}/.xeqmlabs"
     blockchain_file="${blockchain_root}/lmdb/data.mdb"
 
     [[ ! -f "${blockchain_file}" ]] && continue
