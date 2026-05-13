@@ -209,54 +209,54 @@ watch_daemon_status() {
   echo -e "\n\033[1mWaiting till daemon is detected...\033[0m"
   wait_daemon_start
 
-  local start_time=${daemon_start_time}
-  local start_block=0
-  local estimate_time_remaining='Estimating time remaining...'
-  local blocks_done= ; local total_blocks= ; local perc=
-  local delta_blocks_done=$((blocks_done-start_block))
-  local blocks_per_sec=
-  local blocks_remaining=
-  local sec_left_till_completion=
-  local hours_left= ; local mins_left=
-  local hour_word= ; local min_word=
-  local current_time=
-  local delta_time=
+  echo -e "\n\033[1mMonitoring blockchain sync progress:\033[0m\n"
+  printf "\t(waiting for first status...)\n"
 
-  echo -e "\n\033[1mMonitoring blockchain download progress by daemon:\033[0m\n"
+  local last_blocks_done=0
+  local stall_count=0
+  local max_stall=18  # 18 * 10s = 3 minutes with no progress → assume synced
 
   while true; do
-    read blocks_done total_blocks perc <<< "$("${install_root_bin_dir}"/bin/xeqm-d status ${port_params} | grep -o 'Height:.*' | sed -n 's/^Height: \([0-9]*\)\/\([0-9]*\) (\([0-9.]*\).*/\1 \2 \3/p')"
-
-    # skip output of odd total number of blocks like 0 or 1
-    [[ "${total_blocks}" -lt 1000 ]] && continue
-
-    current_time=$(date +%s)
-    delta_time=$((current_time - start_time))
-
-    # calculate new ETR every 60 sec
-    if [[ $delta_time -ge 60 ]]; then
-      delta_blocks_done=$((blocks_done-start_block))
-      blocks_per_sec=$(bc -l <<< "($delta_blocks_done/$delta_time)")
-      blocks_remaining=$((total_blocks - blocks_done))
-      sec_left_till_completion=$(bc <<< "($blocks_remaining/$blocks_per_sec)")
-      hours_left=$((sec_left_till_completion/3600))
-      mins_left=$((sec_left_till_completion%3600/60))
-      [[ $hours_left -eq 1 ]] && hour_word='hour' || hour_word='hours'
-      [[ $mins_left -eq 1 ]] && min_word='minute' || min_word='minutes'
-      estimate_time_remaining=$(printf "ETR: ~ %d %s and %d %s left @ %d blocks p/min" "$hours_left" "$hour_word" "$mins_left" "$min_word" "$delta_blocks_done")
-      start_time=$current_time
-      start_block=$blocks_done
-    fi
-
-    tput cuu1 # put cursor up at beginning of previous line
-    printf "\r\t(%.01f%%) - %d/%d (%s)%-18s\n" "${perc}" "${blocks_done}" "${total_blocks}" "${estimate_time_remaining}" ""
-
-    if [[ $blocks_done -eq $total_blocks ]]; then
-      tput cuu1 # put cursor up at beginning of previous line
-      printf "\r\t(%.01f%%) - %d/%d (%s)%-25s\n" "${perc}" "${blocks_done}" "${total_blocks}" "Completed" ""
+    # primary: check journal for sync completion message
+    if sudo journalctl -u "${service_name}" --no-pager -n 500 2>/dev/null \
+        | grep -q "You are now synchronized with the network"; then
+      tput cuu1
+      printf "\r\t\033[1;32mBlockchain synchronized.\033[0m%-30s\n" ""
       break
     fi
-    sleep 10 # sleep for 10 seconds
+
+    local blocks_done total_blocks perc
+    read blocks_done total_blocks perc <<< "$(
+      sudo -u "${config[running_user]}" "${install_root_bin_dir}"/bin/xeqm-d status \
+        --p2p-bind-port="${config[p2p_bind_port]}" 2>/dev/null \
+        | grep -o 'Height:.*' \
+        | sed -n 's/^Height: \([0-9]*\)\/\([0-9]*\) (\([0-9.]*\).*/\1 \2 \3/p')"
+
+    if [[ "${total_blocks}" =~ ^[0-9]+$ && "${total_blocks}" -ge 1000 ]]; then
+      tput cuu1
+      printf "\r\t(%.01f%%) - %d/%d%-30s\n" "${perc}" "${blocks_done}" "${total_blocks}" ""
+
+      if [[ "${blocks_done}" -ge "${total_blocks}" ]]; then
+        tput cuu1
+        printf "\r\t\033[1;32mBlockchain synchronized.\033[0m%-30s\n" ""
+        break
+      fi
+
+      # stall detection: no new blocks for max_stall intervals
+      if [[ "${blocks_done}" -eq "${last_blocks_done}" ]]; then
+        stall_count=$((stall_count + 1))
+        if [[ "${stall_count}" -ge "${max_stall}" ]]; then
+          tput cuu1
+          printf "\r\t\033[1;33mNo new blocks for 3 minutes — assuming synced.\033[0m%-20s\n" ""
+          break
+        fi
+      else
+        stall_count=0
+        last_blocks_done="${blocks_done}"
+      fi
+    fi
+
+    sleep 10
   done
 }
 
