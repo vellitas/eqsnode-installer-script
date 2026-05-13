@@ -1,7 +1,7 @@
 xeqmnode_installer_version='v6.2'
 readonly xeqmnode_installer_version
 
-version_regex="^v[0-9]+.[0-9]+.[0-9]+$"
+version_regex="^core-v[0-9]+\.[0-9]+\.[0-9]+$"
 readonly version_regex
 
 rev_hash_regex="^[0-9a-f]{5,40}$"
@@ -16,7 +16,7 @@ config=(
   [install_version]='auto'
   [running_user]='snode'
   [required_cmake_version]='3.28'
-  [git_repository]='https://github.com/EquilibriaCC/Equilibria.git'
+  [git_repository]='https://github.com/XEQMLabs/equilibria-core.git'
   [p2p_bind_port]=9230
   [rpc_bind_port]=9231
   [daemon_log_level]=
@@ -228,7 +228,12 @@ default_ports_configured() {
 
 get_latest_equilibria_version_number() {
   local version
-  version="$(git ls-remote --tags "${config[git_repository]}" 2>/dev/null | grep -o 'v.*' | sort -V | tail -1)"
+  version="$(git ls-remote --tags "${config[git_repository]}" 2>/dev/null \
+    | awk -F'/' '{print $NF}' \
+    | grep '^core-v' \
+    | grep -v '\^{}' \
+    | sort -V \
+    | tail -1)"
   if [[ -z "${version}" ]]; then
     printf "\033[0;31mFATAL\033[0m: Could not retrieve latest version from '%s'. Check network connectivity.\n" "${config[git_repository]}" >&2
     exit 1
