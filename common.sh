@@ -24,6 +24,7 @@ config=(
   [open_firewall]=0
   [quiet_mode]=0
   [binary_source]='compile'
+  [service_node_public_ip]=
 )
 
 typeset -A installer_state

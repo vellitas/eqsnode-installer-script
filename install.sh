@@ -132,6 +132,12 @@ set_config_and_execute_info_commands() {
   fi
   if [[ "${command_options_set[daemon_log_level]}" -eq 1 ]]; then daemon_log_level_option_handler "${daemon_log_level_option_value}"; fi
   if [[ "${command_options_set[git_repository]}" -eq 1 ]]; then git_repository_option_handler "${git_repository_option_value}"; fi
+  if [[ "${config[quiet_mode]}" -eq 1 ]]; then
+    config[service_node_public_ip]="$(detect_public_ip)"
+  else
+    prompt_service_node_public_ip
+  fi
+
   if [[ "${command_options_set[open_firewall]}" -eq 1 ]]; then
     config[open_firewall]=1
   elif [[ "${config[quiet_mode]}" -eq 0 ]]; then
@@ -171,6 +177,33 @@ prompt_one_passwd_file() {
         break ;;
       *) echo -e "  \033[0;33mPlease answer Y or N\033[0m" ;;
     esac
+  done
+}
+
+detect_public_ip() {
+  local ip
+  ip="$(curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null \
+    || curl -s --connect-timeout 5 https://ifconfig.me 2>/dev/null \
+    || dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null | head -1)"
+  [[ "${ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && echo "${ip}" || echo ""
+}
+
+prompt_service_node_public_ip() {
+  local detected_ip
+  detected_ip="$(detect_public_ip)"
+
+  echo -e "\n\033[1mService nodes must advertise their public IPv4 address to the network.\033[0m"
+
+  local ip
+  while true; do
+    read -rp $"\n\033[1mPublic IPv4 address of this server\e[0m [${detected_ip}]: " ip
+    ip="${ip:-${detected_ip}}"
+    if [[ "${ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      config[service_node_public_ip]="${ip}"
+      echo -e "  Using: ${ip}"
+      return 0
+    fi
+    echo -e "  \033[0;33mPlease enter a valid IPv4 address\033[0m"
   done
 }
 
@@ -755,6 +788,7 @@ generate_node_config() {
     [binary_source]="${config[binary_source]}"
     [daemon_no_fluffy_blocks]="${config[daemon_no_fluffy_blocks]}"
     [daemon_log_level]="${config[daemon_log_level]}"
+    [service_node_public_ip]="${config[service_node_public_ip]}"
     [open_firewall]="${config[open_firewall]}"
     [installer_home]="/home/${config["snode${node_id}__running_user"]}/xeqm-installer"
   )

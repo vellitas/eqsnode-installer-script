@@ -154,6 +154,9 @@ build_and_install_service_file() {
   echo -e "\n\033[1mGenerating service file '${service_file}'...\033[0m"
 
   local opt_params=
+  if [[ -n "${config[service_node_public_ip]}" ]]; then
+    opt_params+=" --service-node-public-ip=${config[service_node_public_ip]}"
+  fi
   if [[ "${config[daemon_no_fluffy_blocks]}" -eq 1 ]]; then
     opt_params+=" --no-fluffy-blocks"
   fi
