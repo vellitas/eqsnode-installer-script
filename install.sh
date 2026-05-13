@@ -123,7 +123,13 @@ set_config_and_execute_info_commands() {
   else
     blockchain_selection_menu
   fi
-  if [[ "${command_options_set[copy_binaries]}" -eq 1 ]]; then copy_binaries_option_handler "${copy_binaries_option_value}"; fi
+  if [[ "${command_options_set[copy_binaries]}" -eq 1 ]]; then
+    config[binary_source]="${copy_binaries_option_value}"
+  elif [[ "${config[quiet_mode]}" -eq 1 ]]; then
+    config[binary_source]="download"
+  else
+    prompt_binary_source
+  fi
   if [[ "${command_options_set[daemon_log_level]}" -eq 1 ]]; then daemon_log_level_option_handler "${daemon_log_level_option_value}"; fi
   if [[ "${command_options_set[git_repository]}" -eq 1 ]]; then git_repository_option_handler "${git_repository_option_value}"; fi
   if [[ "${command_options_set[open_firewall]}" -eq 1 ]]; then
@@ -269,6 +275,122 @@ copy_binaries_option_handler() {
       done
   else
     echo -e "\n\033[0;33merror: daemon not found in --copy-binaries directory '$1'\033[0m\n"
+    exit 1
+  fi
+}
+
+find_existing_binaries_on_server() {
+  local -n febos__result="$1"
+  local bin_dir
+  for bin_dir in /home/snode*/bin; do
+    [[ -x "${bin_dir}/daemon" ]] && febos__result="${bin_dir}" && return 0
+  done
+  febos__result=""
+  return 1
+}
+
+prompt_binary_source() {
+  local existing_bins=""
+  find_existing_binaries_on_server existing_bins
+
+  local pm__choice
+  if [[ -n "${existing_bins}" ]]; then
+    prompt_menu "How would you like to get the XEQM node binaries?" pm__choice 1 \
+      "Download pre-built binaries from GitHub  (fastest)" \
+      "Use existing binaries already on this server  (${existing_bins})" \
+      "Compile from source  (slowest, ~1 hour)"
+    case "${pm__choice}" in
+      1) config[binary_source]="download" ;;
+      2) config[binary_source]="${existing_bins}" ;;
+      3) config[binary_source]="compile" ;;
+    esac
+  else
+    prompt_menu "How would you like to get the XEQM node binaries?" pm__choice 1 \
+      "Download pre-built binaries from GitHub  (fastest)" \
+      "Compile from source  (slowest, ~1 hour)"
+    case "${pm__choice}" in
+      1) config[binary_source]="download" ;;
+      2) config[binary_source]="compile" ;;
+    esac
+  fi
+}
+
+download_release_binaries() {
+  local version="${config[install_version]}"
+  local tmp_dir
+  tmp_dir="$(mktemp -d /tmp/xeqm-bins-XXXXXX)"
+  local api_url="https://api.github.com/repos/XEQMLabs/equilibria-core/releases"
+
+  [[ "${version}" = "auto" ]] && api_url="${api_url}/latest" || api_url="${api_url}/tags/${version}"
+
+  echo -e "\n\033[1mFetching XEQM release information from GitHub...\033[0m"
+  local release_info
+  release_info="$(wget --quiet -O - "${api_url}" 2>/dev/null)" || {
+    echo -e "\033[0;31merror\033[0m: Could not fetch release info. Check network connectivity."
+    rm -rf "${tmp_dir}"; exit 1
+  }
+
+  local download_url
+  download_url="$(echo "${release_info}" \
+    | grep -o '"browser_download_url": "[^"]*"' \
+    | grep -i 'linux' | grep -i 'x86.64\|amd64' \
+    | head -1 | grep -o 'https://[^"]*')"
+
+  [[ -z "${download_url}" ]] && download_url="$(echo "${release_info}" \
+    | grep -o '"browser_download_url": "[^"]*"' \
+    | grep -i 'linux' | head -1 | grep -o 'https://[^"]*')"
+
+  if [[ -z "${download_url}" ]]; then
+    echo -e "\033[0;31merror\033[0m: No Linux binary found in GitHub release assets. Use --copy-binaries to specify a local path, or choose compile."
+    rm -rf "${tmp_dir}"; exit 1
+  fi
+
+  echo -e "  Downloading: ${download_url##*/}"
+  wget --progress=bar:force:noscroll -O "${tmp_dir}/release.archive" "${download_url}" || {
+    echo -e "\033[0;31merror\033[0m: Download failed."
+    rm -rf "${tmp_dir}"; exit 1
+  }
+
+  echo -e "\n\033[1mExtracting binaries...\033[0m"
+  local archive_type
+  archive_type="$(file "${tmp_dir}/release.archive" | grep -o 'Zip\|gzip\|bzip2\| XZ')"
+  case "${archive_type}" in
+    *Zip*)   unzip -q "${tmp_dir}/release.archive" -d "${tmp_dir}" ;;
+    *gzip*)  tar -xzf "${tmp_dir}/release.archive" -C "${tmp_dir}" ;;
+    *bzip2*) tar -xjf "${tmp_dir}/release.archive" -C "${tmp_dir}" ;;
+    *XZ*)    tar -xJf "${tmp_dir}/release.archive" -C "${tmp_dir}" ;;
+    *)       echo -e "\033[0;31merror\033[0m: Unknown archive format."; rm -rf "${tmp_dir}"; exit 1 ;;
+  esac
+  rm -f "${tmp_dir}/release.archive"
+
+  local daemon_path
+  daemon_path="$(find "${tmp_dir}" -name "daemon" -type f | head -1)"
+  if [[ -z "${daemon_path}" ]]; then
+    echo -e "\033[0;31merror\033[0m: daemon binary not found in downloaded release."
+    rm -rf "${tmp_dir}"; exit 1
+  fi
+
+  local bin_dir
+  bin_dir="$(dirname "${daemon_path}")"
+  chmod +x "${bin_dir}"/*
+  echo "${bin_dir}"
+}
+
+prepare_node1_binaries() {
+  local binary_source="${config[binary_source]}"
+  local target_dir="/home/${config["snode1__running_user"]}/bin"
+
+  if [[ "${binary_source}" = "compile" ]]; then
+    return 0
+  elif [[ "${binary_source}" = "download" ]]; then
+    local bins_path
+    bins_path="$(download_release_binaries)"
+    copy_binaries_to_directory "${bins_path}" "${target_dir}"
+    rm -rf "$(dirname "${bins_path}")"
+  elif [[ -n "${binary_source}" && -x "${binary_source}/daemon" ]]; then
+    copy_binaries_to_directory "${binary_source}" "${target_dir}"
+  else
+    echo -e "\033[0;31merror\033[0m: Binary source '${binary_source}' is not valid or daemon not found."
     exit 1
   fi
 }
@@ -552,43 +674,33 @@ install_manager() {
   local source_dir target_dir
   local idx=1
 
-  setup_all_running_users
-
   while [ "${idx}" -le "${config[nodes]}" ]; do
     generate_node_config node_config "${idx}"
-    tput rev; echo -e "\n\033[1m "${node_config[running_user]}" \033[0m"; tput sgr0
-    # if existing binaries directory is set, copy these for the first node
-    if [[ "${idx}" -eq 1 && "${node_config[copy_binaries]}" != "" ]]; then
-       target_dir="/home/${config["snode1__running_user"]}/bin"
-       copy_binaries_to_directory "${node_config[copy_binaries]}" "${target_dir}"
+    tput rev; echo -e "\n\033[1m  Service Node ${idx} — ${node_config[running_user]}  \033[0m"; tput sgr0
 
-    # for second and subsequent nodes, copy binaries from first node
-    elif [[ "${idx}" -gt 1 ]]; then
+    echo -e "\n\033[1mSetting up user '${node_config[running_user]}'...\033[0m"
+    setup_running_user "${node_config[running_user]}"
+
+    # prepare binaries after node 1's user and home dir exist
+    if [[ "${idx}" -eq 1 ]]; then
+      prepare_node1_binaries
+    else
       source_dir="/home/${config["snode1__running_user"]}/bin"
       target_dir="/home/${node_config[running_user]}/bin"
       copy_binaries_to_directory "${source_dir}" "${target_dir}"
     fi
+
     copy_blockchain_to_user_home_if_needed node_config
     copy_installer_to_installer_home node_config
     install_node_with_running_user "${node_config[running_user]}"
     finish_node_install "${node_config[running_user]}"
 
-    echo -e "\n\033[1mInstallation of Service Node ${idx} completed.\033[0m"
+    echo -e "\n\033[1mInstallation of Service Node ${idx} (${node_config[running_user]}) completed.\033[0m"
     idx=$((idx + 1))
   done
   next_steps
 
   echo -e "\n\033[1mGoodbye!\033[0m\n"
-}
-
-setup_all_running_users() {
-  local idx=1
-
-  while [ "${idx}" -le "${config[nodes]}" ]; do
-    echo -e "\n\033[1mSetting up user '${config["snode${idx}__running_user"]}' to run service node ${idx}...\033[0m\n"
-    setup_running_user "${config["snode${idx}__running_user"]}"
-    idx=$((idx + 1))
-  done
 }
 
 setup_running_user () {
@@ -638,6 +750,7 @@ generate_node_config() {
     [oxenmq_port]="${config["snode${node_id}__oxenmq_port"]}"
     [copy_blockchain]="${config["snode${node_id}__copy_blockchain"]}"
     [copy_binaries]="${config["snode${node_id}__copy_binaries"]}"
+    [binary_source]="${config[binary_source]}"
     [daemon_no_fluffy_blocks]="${config[daemon_no_fluffy_blocks]}"
     [daemon_log_level]="${config[daemon_log_level]}"
     [open_firewall]="${config[open_firewall]}"
