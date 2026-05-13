@@ -4,7 +4,7 @@ After=network-online.target
 [Service]
 Type=simple
 User=%INSTALL_USERNAME%
-ExecStart=%INSTALL_ROOT%/bin/xeqm-d --non-interactive --service-node --no-zmq --restricted-rpc %PORT_PARAMS%%OPT_PARAMS%
+ExecStart=%INSTALL_ROOT%/bin/xeqm-d --non-interactive --service-node --restricted-rpc %PORT_PARAMS%%OPT_PARAMS%
 Restart=always
 RestartSec=30s
 TimeoutSec=120
