@@ -39,16 +39,12 @@ declare -A system_info
 
 main() {
   install_dependencies
-  print_splash_screen
+  print_splash_screen "Service Node Installer" "${xeqmnode_installer_version}"
   discover_system system_info
   process_command_line_args "$@"
 
   pre_install_checks
   install_manager
-}
-
-print_splash_screen() {
-  print_splash_screen "Service Node Installer" "${xeqmnode_installer_version}"
 }
 
 install_dependencies() {

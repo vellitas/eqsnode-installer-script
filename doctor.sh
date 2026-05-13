@@ -27,14 +27,10 @@ command_options_set=(
 
 main() {
   install_dependencies
-  print_splash_screen
+  print_splash_screen "Service Node Doctor" "${eqnode_doctor_version}"
   process_command_line_args "$@"
 
   analyze_and_fix
-}
-
-print_splash_screen() {
-  print_splash_screen "Service Node Doctor" "${eqnode_doctor_version}"
 }
 
 install_dependencies() {
