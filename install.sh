@@ -182,15 +182,34 @@ prompt_open_firewall() {
 }
 
 prompt_nodes_count() {
-  local count
+  local count max_nodes_by_free_space max_nodes_by_memory max_nodes limit_reason
+
+  max_nodes_by_free_space="$((system_info[free_space_home_mount] / 1024 / 2048))"
+  max_nodes_by_memory="$((((system_info[memory] / 1024) - 768) / 800))"
+  if [[ "${max_nodes_by_memory}" -lt "${max_nodes_by_free_space}" ]]; then
+    max_nodes="${max_nodes_by_memory}"
+    limit_reason="RAM"
+  else
+    max_nodes="${max_nodes_by_free_space}"
+    limit_reason="disk space"
+  fi
+
+  echo -e "\n  This server can support up to \033[1m${max_nodes}\033[0m node(s) based on available ${limit_reason}."
+
   while true; do
     read -rp $'\n\033[1mHow many service nodes would you like to install?\e[0m [1]: ' count
     count="${count:-1}"
-    if [[ "${count}" =~ ^[0-9]+$ && "${count}" -ge 1 ]]; then
-      nodes_option_handler "${count}"
-      return 0
+    if ! [[ "${count}" =~ ^[0-9]+$ && "${count}" -ge 1 ]]; then
+      echo -e "  \033[0;33mPlease enter a number between 1 and ${max_nodes}.\033[0m"
+      continue
     fi
-    echo -e "  \033[0;33mPlease enter a number (1 or more)\033[0m"
+    if [[ "${count}" -gt "${max_nodes}" ]]; then
+      echo -e "  \033[0;33mThis server can support a maximum of ${max_nodes} node(s) (limited by ${limit_reason})."
+      echo -e "  Please enter a number between 1 and ${max_nodes}.\033[0m"
+      continue
+    fi
+    nodes_option_handler "${count}"
+    return 0
   done
 }
 
@@ -203,9 +222,9 @@ nodes_option_handler() {
     exit 1
   fi
 
-  max_nodes_by_free_space="$((system_info[free_space_home_mount] / 1024 / 38000))"
+  max_nodes_by_free_space="$((system_info[free_space_home_mount] / 1024 / 2048))"
   # reserved 768MB memory for system use
-  max_nodes_by_memory="$((((system_info[memory] / 1024) - 768) / 1300))"
+  max_nodes_by_memory="$((((system_info[memory] / 1024) - 768) / 800))"
   [[ "${max_nodes_by_memory}" -lt "$max_nodes_by_free_space" ]] && max_nodes="${max_nodes_by_memory}" || max_nodes="${max_nodes_by_free_space}"
 
   if [[ "$1" -gt "${max_nodes}" ]]; then
