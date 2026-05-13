@@ -108,6 +108,10 @@ set_config_and_execute_info_commands() {
   if [[ "${command_options_set[quiet]}" -eq 1 ]]; then config[quiet_mode]=1; fi
   if [[ "${command_options_set[daemon_no_fluffy_blocks]}" -eq 1 ]]; then config[daemon_no_fluffy_blocks]=1; fi
 
+  if [[ "${command_options_set[one_passwd_file]}" -eq 0 && "${config[quiet_mode]}" -eq 0 ]]; then
+    prompt_one_passwd_file
+  fi
+
   # process more complex set config
   if [[ "${command_options_set[version]}" -eq 1 ]]; then version_option_handler "${version_option_value}"; else version_option_handler "auto"; fi
   if [[ "${command_options_set[ports]}" -eq 1 ]]; then ports_option_handler "${ports_option_value}"; else ports_option_handler "auto"; fi
@@ -141,6 +145,27 @@ validate_parsed_command_line_args() {
     "help"
   )
   validate_command_line_option_combinations valid_option_combinations
+}
+
+prompt_one_passwd_file() {
+  if [[ -f "${script_basedir}/.onepasswd" ]]; then
+    echo -e "\n\033[1mShared password file detected — all new users will use the existing password.\033[0m"
+    return 0
+  fi
+
+  local yn
+  while true; do
+    read -rp $'\n\033[1mSet a shared password for all service node users?\e[0m (recommended for multi-node installs) [Y/n]: ' yn
+    yn="${yn:-Y}"
+    case "${yn}" in
+      [Yy]*) one_password_file_option_handler; break ;;
+      [Nn]*)
+        echo -e "\n  You can set this up later by running:"
+        echo -e "    bash install.sh --one-passwd-file"
+        break ;;
+      *) echo -e "  \033[0;33mPlease answer Y or N\033[0m" ;;
+    esac
+  done
 }
 
 prompt_open_firewall() {
