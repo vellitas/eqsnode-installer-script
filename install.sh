@@ -333,12 +333,17 @@ download_release_binaries() {
   local download_url
   download_url="$(echo "${release_info}" \
     | grep -o '"browser_download_url": "[^"]*"' \
-    | grep -i 'linux' | grep -i 'x86.64\|amd64' \
+    | grep -iv '\.sha256' \
+    | grep -iE 'linux|ubuntu' \
+    | grep -iE 'x86_64|amd64' \
     | head -1 | grep -o 'https://[^"]*')"
 
+  # Fallback: any non-checksum linux/ubuntu asset
   [[ -z "${download_url}" ]] && download_url="$(echo "${release_info}" \
     | grep -o '"browser_download_url": "[^"]*"' \
-    | grep -i 'linux' | head -1 | grep -o 'https://[^"]*')"
+    | grep -iv '\.sha256' \
+    | grep -iE 'linux|ubuntu' \
+    | head -1 | grep -o 'https://[^"]*')"
 
   if [[ -z "${download_url}" ]]; then
     echo -e "\033[0;31merror\033[0m: No Linux binary found in GitHub release assets. Use --copy-binaries to specify a local path, or choose compile." >&2
