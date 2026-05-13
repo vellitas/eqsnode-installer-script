@@ -43,24 +43,14 @@ main() {
   upgrade_manager
 }
 
-print_splash_screen () {
-  cat <<'SPLASHMSG'
-
-  _____            _ _ _ _          _
- | ____|__ _ _   _(_) (_) |__  _ __(_) __ _
- |  _| / _` | | | | | | | '_ \| '__| |/ _` |
- | |__| (_| | |_| | | | | |_) | |  | | (_| |
- |_____\__, |\__,_|_|_|_|_.__/|_|  |_|\__,_|
-          |_|
-
-SPLASHMSG
-  echo -e "Service node upgrade script ${eqnode_installer_version}\n"
+print_splash_screen() {
+  print_splash_screen "Service Node Upgrade" "${xeqmnode_installer_version}"
 }
 
 install_dependencies() {
-  if ! [[ -x "$(command -v netstat)" && -x "$(command -v openssl)" && -x "$(command -v natsort)" && -x "$(command -v grep)" && -x "$(command -v getopt)" && -x "$(command -v gawk)" ]]; then
+  if ! [[ -x "$(command -v ss)" && -x "$(command -v openssl)" && -x "$(command -v natsort)" && -x "$(command -v grep)" && -x "$(command -v getopt)" && -x "$(command -v gawk)" ]]; then
     echo -e "\n\033[1mFixing required dependencies....\033[0m"
-    sudo apt -y install net-tools openssl python3-natsort grep util-linux gawk
+    sudo apt -y install iproute2 openssl python3-natsort grep util-linux gawk
   fi
 }
 
@@ -145,7 +135,7 @@ upgrade_manager() {
       echo -e "\033[0;33merror: Invalid username '${username}'. Skipping user!\033[0m\n"
       continue
     fi
-    upgrade_installer_in_installer_home "/home/${username}/eqnode_installer" "${username}"
+    upgrade_installer_in_installer_home "/home/${username}/xeqm-installer" "${username}"
 
     if [[ "${command_options_set[delete_key_file]}" -eq 1 ]]; then
       delete_key_file_handler "${username}"
@@ -156,20 +146,20 @@ upgrade_manager() {
     
     if [[ "${idx}" -eq 1 ]]; then
       first_username="${username}"
-      sudo -H -u "${username}" bash -c "cd ~/eqnode_installer/ && bash eqsnode.sh fork_update"
+      sudo -H -u "${username}" bash -c "cd ~/xeqm-installer/ && bash xeqm-node.sh fork_update"
     else
-      sudo -H -u "${username}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh stop'
+      sudo -H -u "${username}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh stop'
 
       source_dir="/home/${first_username}/bin"
       target_dir="/home/${username}/bin"
       copy_binaries_to_directory "${source_dir}" "${target_dir}"
 
-      sudo -H -u "${username}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh setup_service'
+      sudo -H -u "${username}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh setup_service'
 
-      sudo -H -u "${username}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh start'
+      sudo -H -u "${username}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh start'
 
       if [[ "${config[open_firewall]}" -eq 1 ]]; then
-        sudo -H -u "${username}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh open_firewall'
+        sudo -H -u "${username}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh open_firewall'
       fi
     fi
     idx=$((idx + 1))
@@ -213,12 +203,29 @@ delete_p2pstate_file_handler() {
   fi
 }
 
+backup_key_before_upgrade() {
+  local username="$1"
+  local key_file="/home/${username}/.equilibria/key"
+  local backup_dir="/home/${username}/.equilibria"
+  local timestamp
+  timestamp="$(date +%Y%m%d%H%M%S)"
+
+  if [[ -f "${key_file}" ]]; then
+    local backup="${backup_dir}/key.bak.${timestamp}"
+    sudo cp "${key_file}" "${backup}"
+    echo -e "  Key backed up to: ${backup}"
+  fi
+}
+
 upgrade_installer_in_installer_home() {
   local installer_home="$1"
   local username="$2"
 
+  echo -e "\n\033[1mBacking up service node key for '${username}'...\033[0m"
+  backup_key_before_upgrade "${username}"
+
   echo -e "\n\033[1mUpdating installer in '${installer_home}'...\033[0m"
-  sudo cp -f eqsnode.sh eqnode.service.template common.sh "${installer_home}"
+  sudo cp -f xeqm-node.sh xeqmnode.service.template common.sh "${installer_home}"
 
   update_install_config "${installer_home}/install.conf"
 

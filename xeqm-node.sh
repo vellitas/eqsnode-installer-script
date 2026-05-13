@@ -1,4 +1,4 @@
-#! /bin/env bash
+#!/usr/bin/env bash
 # v1.0 developed by GreggyGB
 # v2.0-v5.x by Mister R
 
@@ -7,14 +7,14 @@ set -o nounset
 set -o pipefail
 
 script_basedir=$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")
-install_root_bin_dir=$(echo ~)
+install_root_bin_dir=$HOME
 install_root_service='/etc/systemd/system'
 readonly script_basedir install_root_bin_dir install_root_service
 
 source "${script_basedir}/common.sh"
 load_config "${script_basedir}/install.conf" config
 
-service_name="eqnode_${config[running_user]}.service"
+service_name="xeqmnode_${config[running_user]}.service"
 service_file="${install_root_service}/${service_name}"
 readonly service_name service_file
 
@@ -27,7 +27,7 @@ readonly port_params
 active_user=${USER:=$(/usr/bin/id -run)}
 readonly active_user
 
-service_template="${script_basedir}/eqnode.service.template"
+service_template="${script_basedir}/xeqmnode.service.template"
 readonly service_template
 
 daemon_start_time=
@@ -88,7 +88,7 @@ install_manager() {
     "${installer_state[enable_service]}")     enable_service_on_boot ;&
     "${installer_state[start_service]}")      start_service ;&
     "${installer_state[watch_daemon]}")       watch_daemon_status ;&
-    "${installer_state[finished]}")           finish_eqsnode_install ;;
+    "${installer_state[finished_xeqmnode_install]}")  finish_xeqmnode_install ;;
     *) printf "Unknown installer state '%s' found in '%s'. Aborting..." "${current_install_state}" "${installer_session_state_file}"
        exit 1 ;;
   esac
@@ -98,8 +98,8 @@ install_required_packages() {
   set_install_session_state "${installer_state[install_packages]}"
 
   echo -e "\n\033[1mInstalling tool packages...\033[0m"
-  sudo apt -y install wget unzip git
   sudo apt update
+  sudo apt -y install wget unzip git
 
   sudo apt-get -y install bc build-essential cmake pkg-config libboost-all-dev libssl-dev libzmq3-dev libunbound-dev libsodium-dev libunwind8-dev liblzma-dev libreadline6-dev libldns-dev libexpat1-dev doxygen graphviz libpgm-dev qttools5-dev-tools libhidapi-dev libusb-dev libprotobuf-dev protobuf-compiler
 }
@@ -190,7 +190,7 @@ wait_daemon_start() {
      if ps aux | grep -q "[d]aemon --non-interactive --service-node" ; then
        break
      fi
-     (polling_time_passed=$polling_time_passed+1)
+     polling_time_passed=$((polling_time_passed + 1))
 
      if [[ $polling_time_passed -eq $timeout_time ]]; then
        echo -e "\033[0;31mOops, the Equilibria daemon seems to be not started or crashed.\033[0m\nExiting service node installer\n"
@@ -221,7 +221,7 @@ watch_daemon_status() {
   echo -e "\n\033[1mMonitoring blockchain download progress by daemon:\033[0m\n"
 
   while true; do
-    read blocks_done total_blocks perc <<< "$(~/bin/daemon status ${port_params} | grep -o 'Height:.*' | sed -n 's/^Height: \([0-9]*\)\/\([0-9]*\) (\([0-9.]*\).*/\1 \2 \3/p')"
+    read blocks_done total_blocks perc <<< "$("${install_root_bin_dir}"/bin/daemon status ${port_params} | grep -o 'Height:.*' | sed -n 's/^Height: \([0-9]*\)\/\([0-9]*\) (\([0-9.]*\).*/\1 \2 \3/p')"
 
     # skip output of odd total number of blocks like 0 or 1
     [[ "${total_blocks}" -lt 1000 ]] && continue
@@ -256,8 +256,8 @@ watch_daemon_status() {
   done
 }
 
-finish_eqsnode_install() {
-  set_install_session_state "${installer_state[finished_eqsnode_install]}"
+finish_xeqmnode_install() {
+  set_install_session_state "${installer_state[finished_xeqmnode_install]}"
 
   if [[ "${config[open_firewall]}" -eq 1 ]]; then
     open_firewall
@@ -265,27 +265,33 @@ finish_eqsnode_install() {
 }
 
 open_firewall() {
-  local firewall_mode='iptables';
+  local firewall_mode='iptables'
+  local p2p_port="${config[p2p_bind_port]}"
+  local quorumnet_port="${config[quorumnet_port]:-$((p2p_port + 2))}"
+  local oxenmq_port="${config[oxenmq_port]:-$((p2p_port + 3))}"
+  local public_ports=("${p2p_port}" "${quorumnet_port}" "${oxenmq_port}")
 
   [[ -x "$(command -v ufw)" ]] && firewall_mode='ufw'
 
   if [[ "${firewall_mode}" = 'iptables' ]]; then
-    echo -e "\n\033[1mOpen firewall p2p port ${config[p2p_bind_port]} [iptables]...\033[0m"
+    echo -e "\n\033[1mOpening firewall ports [iptables]: ${public_ports[*]}...\033[0m"
     check_iptables_dependencies
 
-    sudo iptables -A INPUT -p tcp --dport "${config[p2p_bind_port]}" -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT
-    sudo iptables -A OUTPUT -p tcp --sport "${config[p2p_bind_port]}" -m conntrack --ctstate ESTABLISHED -j ACCEPT
+    for port in "${public_ports[@]}"; do
+      sudo iptables -A INPUT -p tcp --dport "${port}" -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT
+      sudo iptables -A OUTPUT -p tcp --sport "${port}" -m conntrack --ctstate ESTABLISHED -j ACCEPT
+    done
     sudo iptables-save | uniq | sudo tee /etc/iptables/rules.v4 | sudo iptables-restore
     sudo ip6tables-save | uniq | sudo tee /etc/iptables/rules.v6 | sudo ip6tables-restore
 
   elif [[ "${firewall_mode}" = 'ufw' ]]; then
-    echo -e "\n\033[1mOpen firewall p2p port [ufw]...\033[0m"
+    echo -e "\n\033[1mOpening firewall ports [ufw]: ${public_ports[*]}...\033[0m"
     sudo ufw --force enable
-
-    # make sure ssh port is open
     sudo ufw allow ssh
-    sudo ufw allow "${config[p2p_bind_port]}"
-    sudo ufw allow out "${config[p2p_bind_port]}"
+    for port in "${public_ports[@]}"; do
+      sudo ufw allow "${port}"
+      sudo ufw allow out "${port}"
+    done
   fi
 }
 
@@ -311,7 +317,7 @@ prepare_sn() {
 start() {
   echo "Starting XEQ node"
   sudo systemctl start "${service_name}"
-  echo "Service node started to check it works use bash equilibria.sh log"
+  echo "Service node started. To view logs run: bash xeqm-node.sh log"
 }
 
 status() {

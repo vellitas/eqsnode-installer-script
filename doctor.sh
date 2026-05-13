@@ -10,7 +10,7 @@ readonly script_basedir
 
 source "${script_basedir}/discovery.sh"
 
-eqnode_doctor_version='v1.4.1'
+eqnode_doctor_version='v1.5'
 readonly eqnode_doctor_version
 
 typeset -A doctor_config
@@ -33,24 +33,14 @@ main() {
   analyze_and_fix
 }
 
-print_splash_screen () {
-  cat <<'SPLASHMSG'
-
-  _____            _ _ _ _          _
- | ____|__ _ _   _(_) (_) |__  _ __(_) __ _
- |  _| / _` | | | | | | | '_ \| '__| |/ _` |
- | |__| (_| | |_| | | | | |_) | |  | | (_| |
- |_____\__, |\__,_|_|_|_|_.__/|_|  |_|\__,_|
-          |_|
-
-SPLASHMSG
-  echo -e "Service node doctor script ${eqnode_doctor_version}\n"
+print_splash_screen() {
+  print_splash_screen "Service Node Doctor" "${eqnode_doctor_version}"
 }
 
 install_dependencies() {
-  if ! [[ -x "$(command -v netstat)" && -x "$(command -v openssl)" && -x "$(command -v natsort)" && -x "$(command -v grep)" && -x "$(command -v getopt)" && -x "$(command -v gawk)" ]]; then
+  if ! [[ -x "$(command -v ss)" && -x "$(command -v openssl)" && -x "$(command -v natsort)" && -x "$(command -v grep)" && -x "$(command -v getopt)" && -x "$(command -v gawk)" ]]; then
     echo -e "\n\033[1mFixing required dependencies....\033[0m"
-    sudo apt -y install net-tools openssl python3-natsort grep util-linux gawk
+    sudo apt -y install iproute2 openssl python3-natsort grep util-linux gawk
   fi
 }
 
@@ -128,99 +118,195 @@ auto_fix_mode_option_handler() {
 analyze_and_fix() {
   declare -A daemon_users
   echo -e "\n\033[1mAnalyzing active service nodes...\033[0m"
-
   discover_daemons daemon_users 'user'
-  local node_blockstate
-  local allowed_block_difference=2
-  local blocks_done= ; local total_blocks= ;
 
+  if [[ "${#daemon_users[@]}" -eq 0 ]]; then
+    echo -e "\n\033[0;33mNo active XEQM service node daemons found on this server.\033[0m"
+    exit 0
+  fi
+
+  # --- Global checks ---
+  echo -e "\n\033[1mRunning global checks...\033[0m"
+
+  # NTP check
+  local ntp_ok=1
+  if [[ -x "$(command -v timedatectl)" ]]; then
+    if [[ $(sudo timedatectl | grep -o -e 'synchronized: yes' -e 'service: active' | wc -l) -ne 2 ]]; then
+      echo -e "  \033[0;31m[FAIL]\033[0m NTP not synchronized — clock drift can cause node deregistration"
+      ntp_ok=0
+    else
+      echo -e "  \033[0;32m[ OK ]\033[0m NTP synchronized"
+    fi
+  fi
+
+  # Disk space check (warn if < 20 GB free on /home)
+  local free_gb
+  free_gb=$(( $(df /home | awk 'END{ print $4 }') / 1024 / 1024 ))
+  if [[ "${free_gb}" -lt 20 ]]; then
+    echo -e "  \033[0;31m[WARN]\033[0m Low disk space: ${free_gb} GB free on /home (recommended: 50+ GB)"
+  else
+    echo -e "  \033[0;32m[ OK ]\033[0m Disk space: ${free_gb} GB free on /home"
+  fi
+
+  # --- Fetch external block height ---
   echo -e "\n\033[1mFetching external blockchain state...\033[0m"
-  local current_block="$(wget --quiet https://explorer.equilibria.cc/ -O - | grep -o 'XEQ as of block .*' | sed -n 's/^XEQ as of block \([0-9]*\).*/\1/p')"
-  echo -e "Blockchain explorer current block: ${current_block}"
+  local current_block
+  current_block="$(wget --quiet https://explorer.equilibria.cc/ -O - | grep -o 'XEQ as of block .*' | sed -n 's/^XEQ as of block \([0-9]*\).*/\1/p')"
+  if [[ -z "${current_block}" || ! "${current_block}" =~ ^[0-9]+$ ]]; then
+    echo -e "\033[0;31mFATAL\033[0m: Could not retrieve current block height from explorer. Check network connectivity."
+    exit 1
+  fi
+  echo -e "  Explorer current block: ${current_block}"
 
-  local current_block_with_margin=$((current_block - allowed_block_difference));
-  declare -A healthy_blockchains='()'
-  declare -A bad_blockchains='()'
+  local allowed_block_difference=2
+  local current_block_with_margin=$((current_block - allowed_block_difference))
+  declare -A healthy_blockchains
+  declare -A bad_blockchains
   local badidx=1
   local healthyidx=1
-  local service_node_key
+  # Remediation plan lines collected here
+  local -a remediation_lines=()
 
-  for username in "${daemon_users[@]}"
-  do
-    tput rev; echo -e "\n\033[1m "${username}" \033[0m"; tput sgr0
-    echo -e "\033[1mChecking health of service node ran by user '${username}'...\033[0m"
-    service_node_key="$(sudo -H -u "${username}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh print_sn_key' | grep 'Public Key:' | grep -oP '(?<=: )+.*')"
+  # --- Per-node checks ---
+  local blocks_done total_blocks perc service_node_key service_status
 
-    if [[ "${service_node_key}" != "" ]]; then
-      echo -e "Service node key: ${service_node_key}\n"
-      echo -e "\033[1m## Service Node Network Status\033[0m"
-      sudo -H -u "${username}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh print_sn_status'
-      echo -e "\033[1m## END\033[0m"
-    fi
-    read blocks_done total_blocks perc <<< "$(sudo -H -u "${username}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh status' | grep -o 'Height:.*' | sed -n 's/^Height: \([0-9]*\)\/\([0-9]*\) (\([0-9.]*\).*/\1 \2 \3/p')"
+  for username in "${daemon_users[@]}"; do
+    tput rev; printf "\n\033[1m  %s  \033[0m\n" "${username}"; tput sgr0
 
-    echo -e "\nLocal blockchain at block: ${blocks_done}"
-
-
-    if [[ "${blocks_done}" -lt "${current_block_with_margin}" ]]; then
-      if [[ "${perc}" = "100.0" ]]; then
-        bad_blockchains["$badidx"]="${username}"
-        badidx=$((badidx + 1))
-        echo "Blockchain state: BAD"
-      else
-        echo "Blockchain state: SYNCING"
-      fi
+    # Service status
+    local svc_name="eqnode_${username}.service"
+    if sudo systemctl is-active --quiet "${svc_name}" 2>/dev/null; then
+      echo -e "  \033[0;32m[ OK ]\033[0m Service ${svc_name}: active"
     else
+      echo -e "  \033[0;31m[FAIL]\033[0m Service ${svc_name}: not running"
+      remediation_lines+=("${username}: service not running")
+      remediation_lines+=("  → sudo systemctl start ${svc_name}")
+    fi
+
+    # Disk space per user
+    local user_disk_gb
+    user_disk_gb=$(( $(df "/home/${username}" | awk 'END{ print $4 }') / 1024 / 1024 ))
+    if [[ "${user_disk_gb}" -lt 10 ]]; then
+      echo -e "  \033[0;31m[WARN]\033[0m Disk space for ${username}: ${user_disk_gb} GB free"
+      remediation_lines+=("${username}: low disk space (${user_disk_gb} GB free)")
+      remediation_lines+=("  → du -sh /home/${username}/.equilibria")
+    fi
+
+    # SN key and registration status
+    service_node_key="$(sudo -H -u "${username}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh print_sn_key 2>/dev/null' | grep 'Public Key:' | grep -oP '(?<=: )+.*' || true)"
+    if [[ -n "${service_node_key}" ]]; then
+      echo -e "  \033[0;32m[ OK ]\033[0m Public key: ${service_node_key}"
+      echo -e "\n  \033[1mNetwork registration status:\033[0m"
+      sudo -H -u "${username}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh print_sn_status 2>/dev/null' | sed 's/^/  /' || true
+    else
+      echo -e "  \033[0;33m[WARN]\033[0m Could not retrieve public key (daemon may be down or unregistered)"
+      remediation_lines+=("${username}: unable to read public key")
+      remediation_lines+=("  → sudo -H -u ${username} bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh prepare_sn'")
+    fi
+
+    # Blockchain sync state
+    read -r blocks_done total_blocks perc <<< "$(sudo -H -u "${username}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh status 2>/dev/null' | grep -o 'Height:.*' | sed -n 's/^Height: \([0-9]*\)\/\([0-9]*\) (\([0-9.]*\).*/\1 \2 \3/p' || true)"
+
+    echo -e "\n  Local blockchain height: ${blocks_done:-unknown} / ${total_blocks:-unknown} (${perc:-?}%)"
+
+    if [[ -z "${blocks_done}" ]]; then
+      echo -e "  \033[0;31m[FAIL]\033[0m Cannot determine blockchain state"
+      bad_blockchains["$badidx"]="${username}"
+      badidx=$((badidx + 1))
+      remediation_lines+=("${username}: daemon not responding to status")
+      remediation_lines+=("  → sudo journalctl -u ${svc_name} -n 50")
+    elif [[ "${blocks_done}" -lt "${current_block_with_margin}" && "${perc}" = "100.0" ]]; then
+      echo -e "  \033[0;31m[FAIL]\033[0m Blockchain state: CORRUPT / STUCK"
+      bad_blockchains["$badidx"]="${username}"
+      badidx=$((badidx + 1))
+      remediation_lines+=("${username}: blockchain corrupt/stuck at block ${blocks_done} (expected ${current_block})")
+      remediation_lines+=("  → sudo -H -u ${username} bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh stop'")
+      remediation_lines+=("  → # replace /home/${username}/.equilibria/lmdb with bootstrap or healthy donor")
+      remediation_lines+=("  → sudo -H -u ${username} bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh start'")
+    elif [[ "${blocks_done}" -lt "${current_block_with_margin}" ]]; then
+      echo -e "  \033[0;33m[SYNC]\033[0m Blockchain syncing (${blocks_done} / ${current_block})"
+    else
+      echo -e "  \033[0;32m[ OK ]\033[0m Blockchain: HEALTHY (${blocks_done} / ${total_blocks})"
       healthy_blockchains["$healthyidx"]="${username}"
       healthyidx=$((healthyidx + 1))
-      echo "Blockchain state: HEALTHY"
     fi
   done
-  if [[ "${#bad_blockchains[@]}" -gt 0 ]]; then
 
-    if [[ "${#healthy_blockchains[@]}" -gt 0 ]]; then
-      if [[ "${doctor_config[fix_mode]}" = "interactive" ]]; then
-        while true; do
-          read -p $'\n\033[1mThere are bad blockchains. Do you want to fix them?\e[0m [Y/N]: ' yn
-          yn=${yn:-N}
+  # --- Remediation plan ---
+  if [[ "${#remediation_lines[@]}" -gt 0 ]]; then
+    echo ""
+    tput rev; echo -e "\033[1m  REMEDIATION PLAN  \033[0m"; tput sgr0
+    echo ""
+    for line in "${remediation_lines[@]}"; do
+      echo -e "  ${line}"
+    done
+    echo ""
+  fi
 
-          case $yn in
-                [Yy]* ) break;;
-                [Nn]* ) exit 1;;
-                * ) echo -e "(Please answer Y or N)";;
-          esac
-        done
-      fi
-      local username_badblockchain
-      local bad_blockchain_dir healthy_blockchain_dir
-      for username_badblockchain in "${bad_blockchains[@]}"
-      do
-        echo -e "\n\033[1mFixing blockchain of user '${username_badblockchain}'...\033[0m"
-        echo -e "Stopping service node daemon..."
-        sudo -H -u "${username_badblockchain}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh stop'
-
-        bad_blockchain_dir="/home/${username_badblockchain}/.equilibria"
-        healthy_blockchain_dir="/home/${healthy_blockchains[1]}/.equilibria"
-
-        echo -e "\nReplacing bad blockchain by a healthy donor blockchain...(may take several minutes)"
-        sudo rm -Rf "${bad_blockchain_dir}/lmdb"
-        sudo cp -R "${healthy_blockchain_dir}/lmdb" "${bad_blockchain_dir}"
-        sudo chown -R "${username_badblockchain}":"${username_badblockchain}" "${bad_blockchain_dir}"
-
-        echo -e "Starting service node daemon..."
-        sudo -H -u "${username_badblockchain}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh start'
+  # --- Auto-fix bad blockchains from healthy donors ---
+  if [[ "${#bad_blockchains[@]}" -gt 0 && "${#healthy_blockchains[@]}" -gt 0 ]]; then
+    if [[ "${doctor_config[fix_mode]}" = "interactive" ]]; then
+      while true; do
+        read -rp $'\n\033[1mCorrupt/stuck blockchains found. Auto-fix from healthy donor?\e[0m [Y/N]: ' yn
+        yn="${yn:-N}"
+        case "${yn}" in
+          [Yy]*) break ;;
+          [Nn]*) exit 0 ;;
+          *) echo "(Please answer Y or N)" ;;
+        esac
       done
+    fi
 
-      echo -e "\n\033[1mDone\033[0m"
+    local healthy_blockchain_dir="/home/${healthy_blockchains[1]}/.equilibria"
+    for username_bad in "${bad_blockchains[@]}"; do
+      echo -e "\n\033[1mFixing blockchain for '${username_bad}'...\033[0m"
+      sudo -H -u "${username_bad}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh stop'
+
+      local bad_blockchain_dir="/home/${username_bad}/.equilibria"
+      echo -e "  Replacing lmdb from donor '${healthy_blockchains[1]}'... (may take several minutes)"
+      sudo rm -Rf "${bad_blockchain_dir}/lmdb"
+      sudo cp -R "${healthy_blockchain_dir}/lmdb" "${bad_blockchain_dir}"
+      sudo chown -R "${username_bad}:${username_bad}" "${bad_blockchain_dir}"
+
+      sudo -H -u "${username_bad}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh start'
+      echo -e "  \033[0;32mDone.\033[0m"
+    done
+
+  elif [[ "${#bad_blockchains[@]}" -gt 0 ]]; then
+    echo -e "\n\033[0;33mCorrupt/stuck nodes found but no healthy donor available on this server.\033[0m"
+
+    local fix_choice
+    prompt_menu "How would you like to fix the corrupt node(s)?" fix_choice 1 \
+      "Download bootstrap from https://bootstrap.xeqmlabs.com  (~15 min)" \
+      "Skip — I will fix manually later"
+
+    if [[ "${fix_choice}" -eq 1 ]]; then
+      for username_bad in "${bad_blockchains[@]}"; do
+        echo -e "\n\033[1mFixing '${username_bad}' via bootstrap...\033[0m"
+        sudo -H -u "${username_bad}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh stop' 2>/dev/null || true
+
+        local bootstrap_url="https://bootstrap.xeqmlabs.com/lmdb.tar.gz"
+        local tmp_file="/tmp/xeqm-bootstrap-$$.tar.gz"
+        local target_dir="/home/${username_bad}/.equilibria"
+
+        echo -e "  Downloading bootstrap..."
+        wget --progress=bar:force:noscroll -O "${tmp_file}" "${bootstrap_url}"
+
+        echo -e "  Replacing blockchain data..."
+        sudo rm -Rf "${target_dir}/lmdb"
+        sudo tar -xzf "${tmp_file}" -C "${target_dir}"
+        sudo rm -f "${tmp_file}"
+        sudo chown -R "${username_bad}:${username_bad}" "${target_dir}"
+
+        sudo -H -u "${username_bad}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh start'
+        echo -e "  \033[0;32mDone.\033[0m"
+      done
     else
-      echo -e "\n\033[1mUnable to perform surgery as no healthy donor blockchains were found.\e[0m"
-      exit 0
+      echo -e "\nSkipped. See the remediation plan above for manual steps."
     fi
   else
-    echo -e "\n\033[1mBlockchain health check OK\e[0m"
+    echo -e "\n\033[1;32mAll nodes healthy.\033[0m"
   fi
-#  no donor service nocde found
-
 }
 
 usage() {

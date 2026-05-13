@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # by Mister R
 
-set -o errexit
-set -o nounset
 set -euo pipefail
 
 script_basedir=$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")
@@ -26,6 +24,7 @@ command_options_set=(
   [daemon_log_level]=0
   [git_repository]=0
   [open_firewall]=0
+  [quiet]=0
 )
 copy_binaries_option_value=
 copy_blockchain_option_value=
@@ -48,24 +47,14 @@ main() {
   install_manager
 }
 
-print_splash_screen () {
-  cat <<'SPLASHMSG'
-
-  _____            _ _ _ _          _
- | ____|__ _ _   _(_) (_) |__  _ __(_) __ _
- |  _| / _` | | | | | | | '_ \| '__| |/ _` |
- | |__| (_| | |_| | | | | |_) | |  | | (_| |
- |_____\__, |\__,_|_|_|_|_.__/|_|  |_|\__,_|
-          |_|
-
-SPLASHMSG
-  echo -e "Service node installer script ${eqnode_installer_version}\n"
+print_splash_screen() {
+  print_splash_screen "Service Node Installer" "${xeqmnode_installer_version}"
 }
 
 install_dependencies() {
-  if ! [[ -x "$(command -v netstat)" && -x "$(command -v openssl)" && -x "$(command -v natsort)" && -x "$(command -v grep)" && -x "$(command -v getopt)" && -x "$(command -v gawk)" ]]; then
+  if ! [[ -x "$(command -v ss)" && -x "$(command -v openssl)" && -x "$(command -v natsort)" && -x "$(command -v grep)" && -x "$(command -v getopt)" && -x "$(command -v gawk)" ]]; then
     echo -e "\n\033[1mFixing required dependencies....\033[0m"
-    sudo apt -y install net-tools openssl python3-natsort grep util-linux gawk
+    sudo apt -y install iproute2 openssl python3-natsort grep util-linux gawk
   fi
 }
 
@@ -76,7 +65,7 @@ process_command_line_args() {
 }
 
 parse_command_line_args() {
-  args="$(getopt -a -n installer -o "hiob:c:n:p:u:v:" --long help,inspect-auto-magic,one-passwd-file,copy-binaries:,copy-blockchain:,nodes:,ports:,user:,version:,set-daemon-log-level:,set-daemon-no-fluffy-blocks,git-repository:,open-firewall -- "$@")"
+  args="$(getopt -a -n installer -o "hiob:c:n:p:qu:v:" --long help,inspect-auto-magic,one-passwd-file,copy-binaries:,copy-blockchain:,nodes:,ports:,quiet,user:,version:,set-daemon-log-level:,set-daemon-no-fluffy-blocks,git-repository:,open-firewall -- "$@")"
   eval set -- "${args}"
 
   while :
@@ -89,6 +78,7 @@ parse_command_line_args() {
       -n | --nodes)                   command_options_set[nodes]=1; nodes_option_value="$2"; shift 2 ;;
       -o | --one-passwd-file)         command_options_set[one_passwd_file]=1; shift 1 ;;
       -p | --ports)                   command_options_set[ports]=1; ports_option_value="$2"; shift 2 ;;
+      -q | --quiet)                   command_options_set[quiet]=1; shift ;;
       -u | --user)                    command_options_set[user]=1; user_option_value="$2"; shift 2 ;;
       -v | --version)                 command_options_set[version]=1; version_option_value="$2"; shift 2 ;;
       --set-daemon-no-fluffy-blocks)  command_options_set[daemon_no_fluffy_blocks]=1; shift ;;
@@ -113,13 +103,20 @@ set_config_and_execute_info_commands() {
   # info commands, exit 0 must be first listed options in this function
   [[ "${command_options_set[inspect_auto_magic]}" -eq 1 ]] && inspect_auto_magic_option_handler && exit 0
 
+  if [[ "${command_options_set[quiet]}" -eq 1 ]]; then config[quiet_mode]=1; fi
   if [[ "${command_options_set[daemon_no_fluffy_blocks]}" -eq 1 ]]; then config[daemon_no_fluffy_blocks]=1; fi
 
   # process more complex set config
   if [[ "${command_options_set[version]}" -eq 1 ]]; then version_option_handler "${version_option_value}"; else version_option_handler "auto"; fi
   if [[ "${command_options_set[ports]}" -eq 1 ]]; then ports_option_handler "${ports_option_value}"; else ports_option_handler "auto"; fi
   if [[ "${command_options_set[user]}" -eq 1 ]]; then user_option_handler "${user_option_value}"; else user_option_handler "auto"; fi
-  if [[ "${command_options_set[copy_blockchain]}" -eq 1 ]]; then copy_blockchain_option_handler "${copy_blockchain_option_value}"; else copy_blockchain_option_handler "auto"; fi
+  if [[ "${command_options_set[copy_blockchain]}" -eq 1 ]]; then
+    copy_blockchain_option_handler "${copy_blockchain_option_value}"
+  elif [[ "${config[quiet_mode]}" -eq 1 ]]; then
+    copy_blockchain_option_handler "bootstrap"
+  else
+    blockchain_selection_menu
+  fi
   if [[ "${command_options_set[copy_binaries]}" -eq 1 ]]; then copy_binaries_option_handler "${copy_binaries_option_value}"; fi
   if [[ "${command_options_set[daemon_log_level]}" -eq 1 ]]; then daemon_log_level_option_handler "${daemon_log_level_option_value}"; fi
   if [[ "${command_options_set[git_repository]}" -eq 1 ]]; then git_repository_option_handler "${git_repository_option_value}"; fi
@@ -132,7 +129,7 @@ set_config_and_execute_info_commands() {
 validate_parsed_command_line_args() {
   local valid_option_combinations=(
     "<no_options_set>"
-    "copy_blockchain copy_binaries nodes ports user version daemon_no_fluffy_blocks daemon_log_level git_repository open_firewall"
+    "copy_blockchain copy_binaries nodes ports user version daemon_no_fluffy_blocks daemon_log_level git_repository open_firewall quiet"
     "inspect_auto_magic nodes"
     "one_passwd_file"
     "help"
@@ -152,7 +149,7 @@ nodes_option_handler() {
   max_nodes_by_free_space="$((system_info[free_space_home_mount] / 1024 / 38000))"
   # reserved 768MB memory for system use
   max_nodes_by_memory="$((((system_info[memory] / 1024) - 768) / 1300))"
-  [[ "${max_nodes_by_memory}" -gt "$max_nodes_by_free_space" ]] && max_nodes="${max_nodes_by_memory}" || max_nodes="${max_nodes_by_free_space}"
+  [[ "${max_nodes_by_memory}" -lt "$max_nodes_by_free_space" ]] && max_nodes="${max_nodes_by_memory}" || max_nodes="${max_nodes_by_free_space}"
 
   if [[ "$1" -gt "${max_nodes}" ]]; then
     echo -e "\033[0;33merror: Too many nodes set as --nodes option value. Max nodes: ${max_nodes}. Check system specifications (memory/disk space).\033[0m\n"
@@ -168,6 +165,8 @@ nodes_option_handler() {
     config["snode${idx}__copy_binaries"]=
     config["snode${idx}__p2p_bind_port"]=0
     config["snode${idx}__rpc_bind_port"]=0
+    config["snode${idx}__quorumnet_port"]=0
+    config["snode${idx}__oxenmq_port"]=0
     idx=$((idx + 1))
   done
 
@@ -198,17 +197,39 @@ copy_binaries_option_handler() {
   fi
 }
 
+blockchain_selection_menu() {
+  local choice
+  prompt_menu "How should this node get its blockchain?" choice 1 \
+    "Download bootstrap  (fastest, ~15 min  —  https://bootstrap.xeqmlabs.com)" \
+    "Copy from an existing active node on this server  (auto-detect)" \
+    "Sync from the network  (slowest, may take many hours)"
+
+  case "${choice}" in
+    1) copy_blockchain_option_handler "bootstrap" ;;
+    2) copy_blockchain_option_handler "auto" ;;
+    3) copy_blockchain_option_handler "no" ;;
+  esac
+}
+
 copy_blockchain_option_handler() {
-  local blockchain fixed_value
+  local blockchain
   local idx=1
   local option_value="$1"
+
+  if [[ "${option_value}" = "bootstrap" ]]; then
+    while [ "${idx}" -le "${config[nodes]}" ]; do
+      config["snode${idx}__copy_blockchain"]="bootstrap"
+      idx=$((idx + 1))
+    done
+    echo -e "\n\033[1mBlockchain: download bootstrap from https://bootstrap.xeqmlabs.com\033[0m"
+    return 0
+  fi
 
   if [[ "${option_value}" = "auto" ]]; then
     blockchain="$(discover_biggest_blockchain)"
     if [[ -d "${blockchain}" ]]; then option_value="${blockchain}"; else option_value="no,auto"; fi
   fi
 
-  # TODO: check directory contains blockchain
   if [[ "${option_value}" = "no" || -f "${option_value}/lmdb/data.mdb" ]]; then
       while [ "${idx}" -le "${config[nodes]}" ]; do
         config["snode${idx}__copy_blockchain"]="${option_value}"
@@ -233,9 +254,33 @@ copy_blockchain_option_handler() {
   echo -e "\n\033[1mBlockchain copy settings...\033[0m"
   while [ "${idx}" -le "${config[nodes]}" ]; do
     [[ "${config[nodes]}" -gt 1 ]] && echo -e "\nService Node ${idx}:"
-    echo -e "Copy blockchain: ${config["snode${idx}__copy_blockchain"]}"
+    echo -e "  Copy blockchain: ${config["snode${idx}__copy_blockchain"]}"
     idx=$((idx + 1))
   done
+}
+
+download_bootstrap() {
+  local target_dir="$1"
+  local username="$2"
+  local bootstrap_url="https://bootstrap.xeqmlabs.com/lmdb.tar.gz"
+  local tmp_file="/tmp/xeqm-bootstrap-$$.tar.gz"
+
+  echo -e "\n\033[1mDownloading XEQM bootstrap blockchain...\033[0m"
+  echo -e "  Source: ${bootstrap_url}\n"
+
+  wget --progress=bar:force:noscroll -O "${tmp_file}" "${bootstrap_url}"
+
+  echo -e "\n\033[1mExtracting bootstrap to '${target_dir}'...\033[0m"
+
+  if [[ -d "${target_dir}" ]]; then
+    sudo mv "${target_dir}" "${target_dir}_$(echo $RANDOM | md5sum | head -c 8)"
+  fi
+  sudo mkdir -p "${target_dir}"
+  sudo tar -xzf "${tmp_file}" -C "${target_dir}"
+  sudo rm -f "${tmp_file}"
+  sudo chown -R "${username}:${username}" "${target_dir}"
+
+  echo -e "\033[1;32mBootstrap extracted successfully.\033[0m"
 }
 
 auto_ports_option_handler() {
@@ -247,10 +292,14 @@ auto_ports_option_handler() {
   while [ "${idx}" -le "${config[nodes]}" ]; do
     config["snode${idx}__p2p_bind_port"]="${discovered_sets["set${idx}__p2p_bind_port"]}"
     config["snode${idx}__rpc_bind_port"]="${discovered_sets["set${idx}__rpc_bind_port"]}"
+    config["snode${idx}__quorumnet_port"]="${discovered_sets["set${idx}__quorumnet_port"]}"
+    config["snode${idx}__oxenmq_port"]="${discovered_sets["set${idx}__oxenmq_port"]}"
 
     [[ "${config[nodes]}" -gt 1 ]] && echo -e "\nService Node ${idx}:"
-    echo -e "Detected available p2p_bind_port -> port ${config["snode${idx}__p2p_bind_port"]}"
-    echo -e "Detected available rpc_bind_port -> port ${config["snode${idx}__rpc_bind_port"]}"
+    echo -e "  p2p_bind_port  -> ${config["snode${idx}__p2p_bind_port"]}"
+    echo -e "  rpc_bind_port  -> ${config["snode${idx}__rpc_bind_port"]}"
+    echo -e "  quorumnet_port -> ${config["snode${idx}__quorumnet_port"]}"
+    echo -e "  oxenmq_port    -> ${config["snode${idx}__oxenmq_port"]}"
 
     idx=$((idx + 1))
   done
@@ -271,7 +320,7 @@ inspect_auto_magic_option_handler() {
 
 one_password_file_option_handler() {
   echo -e "\n\033[1mSet one password for all new service node users. Will be stored encrypted!\033[0m"
-  $(while true; do read -sp $'\rPassword: ' pwd; read -sp $'\rRe-passwd: ' re_pwd; [[ "${pwd}" = "${re_pwd}" ]] && echo "${pwd}" && break; done | openssl passwd -1 -stdin > .onepasswd )
+  while true; do read -sp $'\rPassword: ' pwd; read -sp $'\rRe-passwd: ' re_pwd; [[ "${pwd}" = "${re_pwd}" ]] && echo "${pwd}" && break; done | openssl passwd -6 -stdin > "${script_basedir}/.onepasswd"
 
   if [[ -f "${script_basedir}/.onepasswd" ]]; then
     echo -e "\n\nsucces: .onepasswd file created. Remove this file to enable manual password input again."
@@ -343,12 +392,12 @@ valid_manual_port_string_format() {
     "$(echo "$1" | grep -oP -e 'rpc:[0-9+]+' | grep -oP -e "(?<=rpc:|\+)[0-9]+" | wc -l )" -eq "${config[nodes]}" &&
 
     # Since all ports should be unique. Check if total number of unique ports equals (number of nodes * 2 ports(p2p+rpc) each)
-    "$(echo "$1" | grep -oP -e '(?<=p2p:|rpc:|\+)+[0-9]+' | natsort | uniq | wc -l)" -eq "(${config[nodes]} * 2)"
+    "$(echo "$1" | grep -oP -e '(?<=p2p:|rpc:|\+)+[0-9]+' | natsort | uniq | wc -l)" -eq "$((config[nodes] * 2))"
   ]]
 }
 
 running_user_has_active_installation() {
-   [[ "$(sudo ps aux | grep '[b]ash.*eqsnode.sh' | grep -v '[s]udo' | gawk '{ printf("%s\n", $1) }' | grep -c "$1")" -gt 0 ]]
+   [[ "$(sudo ps aux | grep '[b]ash.*xeqm-node.sh' | grep -v '[s]udo' | gawk '{ printf("%s\n", $1) }' | grep -c "$1")" -gt 0 ]]
 }
 
 parse_manual_port_string_and_set_config_if_valid() {
@@ -396,6 +445,14 @@ parse_manual_port_string_and_set_config_if_valid() {
   if [[ "${port_error}" -eq 1 ]]; then
     exit 1
   fi
+
+  # derive quorumnet (p2p+2) and oxenmq (p2p+3) for each node
+  local qidx=1
+  while [ "${qidx}" -le "${config[nodes]}" ]; do
+    config["snode${qidx}__quorumnet_port"]=$((config["snode${qidx}__p2p_bind_port"] + 2))
+    config["snode${qidx}__oxenmq_port"]=$((config["snode${qidx}__p2p_bind_port"] + 3))
+    qidx=$((qidx + 1))
+  done
 }
 
 auto_search_available_username() {
@@ -481,11 +538,14 @@ create_user_if_needed() {
 sudoers_user_nopasswd() {
   local action="$1"
   local user="$2"
-  local sudo_settings sed_command
-  [[ "${action}" = 'add' ]] && sudo_settings='ALL=(ALL) NOPASSWD:ALL' || sudo_settings='ALL=(ALL:ALL) ALL'
-  # shellcheck disable=SC2116
-  sed_command="$(echo "/^${user} /{h;s/ .*/ ${sudo_settings}/};\${x;/^$/{s//${user} ${sudo_settings}/;H};x}")"
-  sudo sed -i "${sed_command}" /etc/sudoers
+  local sudoers_file="/etc/sudoers.d/xeqmnode-${user}"
+
+  if [[ "${action}" = 'add' ]]; then
+    echo "${user} ALL=(ALL) NOPASSWD:ALL" | sudo tee "${sudoers_file}" > /dev/null
+    sudo chmod 440 "${sudoers_file}"
+  else
+    [[ -f "${sudoers_file}" ]] && sudo rm "${sudoers_file}"
+  fi
 }
 
 generate_node_config() {
@@ -498,30 +558,36 @@ generate_node_config() {
     [running_user]="${config["snode${node_id}__running_user"]}"
     [p2p_bind_port]="${config["snode${node_id}__p2p_bind_port"]}"
     [rpc_bind_port]="${config["snode${node_id}__rpc_bind_port"]}"
+    [quorumnet_port]="${config["snode${node_id}__quorumnet_port"]}"
+    [oxenmq_port]="${config["snode${node_id}__oxenmq_port"]}"
     [copy_blockchain]="${config["snode${node_id}__copy_blockchain"]}"
     [copy_binaries]="${config["snode${node_id}__copy_binaries"]}"
     [daemon_no_fluffy_blocks]="${config[daemon_no_fluffy_blocks]}"
     [daemon_log_level]="${config[daemon_log_level]}"
     [open_firewall]="${config[open_firewall]}"
-    [installer_home]="/home/${config["snode${node_id}__running_user"]}/eqnode_installer"
+    [installer_home]="/home/${config["snode${node_id}__running_user"]}/xeqm-installer"
   )
 }
 
 copy_blockchain_to_user_home_if_needed() {
   local -n cbtuhin__node_config_ref="$1"
-  local source_dir target_dir
+  local target_dir="/home/${cbtuhin__node_config_ref[running_user]}/.equilibria"
+  local blockchain_value="${cbtuhin__node_config_ref[copy_blockchain]}"
 
-  if [[ -d "${cbtuhin__node_config_ref[copy_blockchain]}" ]]; then
-    echo -e "\n\033[1mCopying blockchain from '${cbtuhin__node_config_ref[copy_blockchain]}'...(takes 1-5 minutes)\033[0m"
-    target_dir="/home/${cbtuhin__node_config_ref[running_user]}/.equilibria"
+  if [[ "${blockchain_value}" = "bootstrap" ]]; then
+    download_bootstrap "${target_dir}" "${cbtuhin__node_config_ref[running_user]}"
+    return 0
+  fi
+
+  if [[ -d "${blockchain_value}" ]]; then
+    echo -e "\n\033[1mCopying blockchain from '${blockchain_value}'... (takes 1-5 minutes)\033[0m"
 
     if [[ -d "${target_dir}" ]]; then
-      # move existing .equilibria directory just to be safe
       sudo mv "${target_dir}" "${target_dir}_$(echo $RANDOM | md5sum | head -c 8)"
     fi
     sudo mkdir "${target_dir}"
-    sudo chmod "$(stat --format '%a' "${cbtuhin__node_config_ref[copy_blockchain]}")" "$target_dir"
-    sudo cp -R "${cbtuhin__node_config_ref[copy_blockchain]}/lmdb" "${target_dir}"
+    sudo chmod "$(stat --format '%a' "${blockchain_value}")" "${target_dir}"
+    sudo cp -R "${blockchain_value}/lmdb" "${target_dir}"
     sudo chown -R "${cbtuhin__node_config_ref[running_user]}":"${cbtuhin__node_config_ref[running_user]}" "${target_dir}"
   fi
 }
@@ -533,9 +599,9 @@ copy_installer_to_installer_home() {
 
   echo -e "\n\033[1mCopying installer to '${citih__node_config_ref[installer_home]}'...\033[0m"
   sudo mkdir "${citih__node_config_ref[installer_home]}"
-  sudo cp eqsnode.sh eqnode.service.template common.sh "${citih__node_config_ref[installer_home]}"
+  sudo cp xeqm-node.sh xeqmnode.service.template common.sh "${citih__node_config_ref[installer_home]}"
 
-  install_config_file_path="${citih__node_config_ref[installer_home]}/install.conf"
+  local install_config_file_path="${citih__node_config_ref[installer_home]}/install.conf"
 
   echo -e "\n\033[1mGenerating new install.conf in '${install_config_file_path}'...\033[0m"
   write_config citih__node_config_ref "${install_config_file_path}"
@@ -545,7 +611,7 @@ copy_installer_to_installer_home() {
 
 install_node_with_running_user() {
   local running_user="$1"
-  sudo -H -u "${running_user}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh install'
+  sudo -H -u "${running_user}" bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh install'
 }
 
 finish_node_install() {
@@ -553,19 +619,37 @@ finish_node_install() {
   sudoers_user_nopasswd 'remove' "${user}"
 }
 
+print_firewall_port_table() {
+  echo -e "\n\033[1mFirewall ports required per service node:\033[0m"
+  local idx=1
+  while [ "${idx}" -le "${config[nodes]}" ]; do
+    [[ "${config[nodes]}" -gt 1 ]] && echo -e "\n  \033[1mService Node ${idx}\033[0m"
+    local p2p="${config["snode${idx}__p2p_bind_port"]}"
+    local quorum="${config["snode${idx}__quorumnet_port"]}"
+    local oxenmq="${config["snode${idx}__oxenmq_port"]}"
+    printf "\n  %-18s %-8s %-10s %s\n" "Service" "Port" "Protocol" "Notes"
+    printf "  %-18s %-8s %-10s %s\n" "──────────────────" "────────" "──────────" "──────────────────────────────"
+    printf "  %-18s %-8s %-10s %s\n" "P2P" "${p2p}" "TCP" "Inbound — peer discovery"
+    printf "  %-18s %-8s %-10s %s\n" "Quorumnet" "${quorum}" "TCP" "SN-to-SN consensus (public)"
+    printf "  %-18s %-8s %-10s %s\n" "OxenMQ" "${oxenmq}" "TCP" "Public"
+    idx=$((idx + 1))
+  done
+  echo ""
+}
+
 next_steps() {
-  tput rev; echo -e "\n\033[1m IMPORTANT: READ THE LAST STEPS TO COMPLETE A WORKING SERVICE NODE BELOW \033[0m"; tput sgr0
-  echo -e "\nIn order to complete the installation of a service node, you need to link a wallet to each node as operator."
-  echo -e "The following command(s) will get you started."
-  echo -e "\n\033[0;33m(Run command(s) and read the presented instructions carefully)\033[0m"
+  tput rev; echo -e "\n\033[1m IMPORTANT: COMPLETE THESE STEPS TO FINISH SERVICE NODE SETUP \033[0m"; tput sgr0
+  echo -e "\nTo complete setup, link a wallet to each node as operator using the command(s) below."
+  echo -e "\033[0;33m(Run each command and follow the presented instructions carefully)\033[0m"
   local idx=1
 
   while [ "${idx}" -le "${config[nodes]}" ]; do
     echo -e "\nService Node ${idx}:"
-    echo -e "\033[1msudo -H -u "${config[snode${idx}__running_user]}" bash -c 'cd ~/eqnode_installer/ && bash eqsnode.sh prepare_sn'\033[0m"
-
+    echo -e "\033[1msudo -H -u ${config["snode${idx}__running_user"]} bash -c 'cd ~/xeqm-installer/ && bash xeqm-node.sh prepare_sn'\033[0m"
     idx=$((idx + 1))
   done
+
+  print_firewall_port_table
 }
 
 
@@ -584,79 +668,65 @@ usage() {
 bash $0 [OPTIONS...]
 
 Options:
-  -b --copy-binaries [path]             Copy previously compiled binaries. Saves the time
-                                        of downloading and building new binaries. If the
-                                        --version option is used and set to a specific
-                                        version, it will verify if the binaries match
-                                        this version.
+  -b --copy-binaries [path]             Copy previously compiled binaries. If --version is
+                                        set to a specific version it verifies the match.
 
                                         Example: --copy-binaries /home/snode/bin
 
-  -c --copy-blockchain [no|auto|path]   Copy a previously downloaded blockchain if present
-                                        on VPS or server for fast installation. Set 'auto'
-                                        for auto-detect (default). Set a .equilibria
-                                        directory or 'no' to force a fresh download of the
-                                        blockchain. Use 'no,auto' when the first node
-                                        should download a fresh blockchain, while subsequent
-                                        node installations should copy the fresh blockchain
-                                        download from the first node.
+  -c --copy-blockchain [bootstrap|no|auto|path]
+                                        How to seed the blockchain. 'bootstrap' downloads
+                                        from https://bootstrap.xeqmlabs.com (~15 min).
+                                        'auto' copies from an existing node on this server.
+                                        'no' syncs fresh from the network (many hours).
+                                        'no,auto' = first node syncs fresh, subsequent
+                                        nodes copy from it (multi-node installs).
 
-                                        Examples: --copy-blockchain auto
+                                        Examples: --copy-blockchain bootstrap
+                                                  --copy-blockchain auto
                                                   --copy-blockchain /home/snode/.equilibria
                                                   --copy-blockchain no
                                                   --copy-blockchain no,auto
 
-  -i --inspect-auto-magic               Display preview of all automatically set port,
-                                        users and Equilibria version
+  -i --inspect-auto-magic               Preview auto-detected ports, users, and version.
 
-  -n --nodes [number]                   Number of nodes to install. If --nodes option is
-                                        not specified, then only one node will be installed.
+  -n --nodes [number]                   Number of nodes to install (default: 1).
 
-  -p  --ports [auto|config]             Set port configuration. Format:
+  -p  --ports [auto|config]             Port configuration. Format:
                                         p2p:<port[+port+...]>,rpc:<port[+port+...]>
+                                        Quorumnet and OxenMQ are derived as p2p+2 / p2p+3.
 
                                         Examples:
-                                        --ports p2p:9330,rpc:9331
-                                        --nodes 2 --ports p2p:9330+9430,rpc:9331+9431
+                                        --ports p2p:9230,rpc:9231
+                                        --nodes 2 --ports p2p:9230+9330,rpc:9231+9331
 
-                                        Auto detect ports; This requires ALL other service
-                                        nodes to be active.
-                                        Example:  --ports auto
+  -o --one-passwd-file                  Pre-generate an encrypted password file used for
+                                        all new service node users. Run this first for a
+                                        fully non-interactive install.
 
-  -o --one-passwd-file                  Generate a one password file, that contains an
-                                        encrypted password, which will be used as password
-                                        for all service nodes users that will be created.
-                                        Now and in the future, until the .onepwd file is
-                                        deleted. Run 'bash $0 --one-passwd-file'
-                                        before 'bash $0' for a non-interactive
-                                        installation of the service node.
+  -q --quiet                            Non-interactive mode. All decisions use defaults
+                                        or supplied flags. Exits with an error if a
+                                        required flag is missing. Blockchain defaults to
+                                        'bootstrap'.
 
-  -u --user [auto|name,...]             Set username that will run the service node or
-                                        'auto' for autodetect. In case --nodes option is
-                                        set you can add multiple usernames comma separated.
+  -u --user [auto|name,...]             Username(s) to run the service node(s). 'auto'
+                                        finds an unused name automatically.
 
                                         Examples:   --user snode2
                                                     --user auto
                                                     --nodes 2 --user snode,snode2
-                                                    --nodes 2 --user auto
 
-  -v --version [auto|[version/hash]]    Set Equilibria version tag with format 'v0.0.0'
-                                        or 'master' or git hash. Use 'auto' to install
-                                        the latest version tag. If you do not know which
-                                        version to use choose 'auto' or remove --version
-                                        option from command line
+  -v --version [auto|version|hash]      XEQM version tag (v0.0.0), 'master', or git hash.
+                                        'auto' installs the latest release.
 
                                         Examples:   --version auto
-                                                    --version master
                                                     --version v20.0.0
                                                     --version 122d5f6a6
 
-  --set-daemon-log-level                Add --log-level parameter to daemon command in
-                                        service file.
+  --set-daemon-log-level [level]        Set daemon --log-level in the service file.
 
                                         Example:   --set-daemon-log-level 0,stacktrace:FATAL
 
-  --open-firewall [no|yes]              Open firewall for p2p in/out ports. Default: no.
+  --open-firewall                       Auto-configure UFW/iptables for all required ports.
 
   -h  --help                            Show this help text
 

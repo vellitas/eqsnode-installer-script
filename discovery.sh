@@ -55,29 +55,29 @@ discover_free_port_sets() {
   local number_of_sets="$2"
   local sets_counter=0
 
-  # find available ports
   local port_increment=100
-  local p2p_port rpc_port validation_result
+  local p2p_port rpc_port quorumnet_port oxenmq_port validation_result
   p2p_port=${default_service_node_ports[p2p_bind_port]}
-  rpc_port=${default_service_node_ports[rpc_bind_port]}
 
   while true; do
-    validation_result="$(validate_port "${p2p_port}") $(validate_port "${rpc_port}")"
+    rpc_port=$((p2p_port + 1))
+    quorumnet_port=$((p2p_port + 2))
+    oxenmq_port=$((p2p_port + 3))
+    validation_result="$(validate_port "${p2p_port}") $(validate_port "${rpc_port}") $(validate_port "${quorumnet_port}") $(validate_port "${oxenmq_port}")"
 
-    # break if all two ports are available and within allowed port range
-    if [[ $(echo "${validation_result}" | grep -o -e 'free_port' | wc -l) -eq 2 ]]; then
+    if [[ $(echo "${validation_result}" | grep -o -e 'free_port' | wc -l) -eq 4 ]]; then
       sets_counter=$((sets_counter + 1))
       result["set${sets_counter}__p2p_bind_port"]="${p2p_port}"
       result["set${sets_counter}__rpc_bind_port"]="${rpc_port}"
+      result["set${sets_counter}__quorumnet_port"]="${quorumnet_port}"
+      result["set${sets_counter}__oxenmq_port"]="${oxenmq_port}"
 
       [[ "${sets_counter}" -eq "${number_of_sets}" ]] && break
 
-    # break if at least one port is outside of the allowed port range
-    elif [[ $(echo "${validation_result}" | grep -c 'outside_port_range') -eq 1 ]]; then
+    elif [[ $(echo "${validation_result}" | grep -c 'outside_port_range') -ge 1 ]]; then
       return 1
     fi
     p2p_port=$((p2p_port + port_increment))
-    rpc_port=$((rpc_port + port_increment))
   done
 
   return 0
@@ -88,7 +88,7 @@ validate_port() {
 
   if [ "${port}" -lt 5000 ] || [ "${port}" -gt 49151 ]; then
     echo "outside_port_range"
-  elif [[ "$(sudo netstat -lnp | grep -c ":${port}")" -gt 0 ]]; then
+  elif [[ "$(sudo ss -lnp | grep -c ":${port}[^0-9]")" -gt 0 ]]; then
     echo "port_used"
   else
     echo "free_port"

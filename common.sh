@@ -1,5 +1,5 @@
-eqnode_installer_version='v6.1'
-readonly eqnode_installer_version
+xeqmnode_installer_version='v6.2'
+readonly xeqmnode_installer_version
 
 version_regex="^v[0-9]+.[0-9]+.[0-9]+$"
 readonly version_regex
@@ -22,6 +22,7 @@ config=(
   [daemon_log_level]=
   [daemon_no_fluffy_blocks]=0
   [open_firewall]=0
+  [quiet_mode]=0
 )
 
 typeset -A installer_state
@@ -35,7 +36,7 @@ installer_state=(
   [start_service]='start_service'
   [watch_daemon]='watch_daemon'
   [ask_prepare]='ask_prepare'
-  [finished_eqsnode_install]='finished_eqsnode_install'
+  [finished_xeqmnode_install]='finished_xeqmnode_install'
 )
 readonly installer_state
 
@@ -50,13 +51,13 @@ load_config() {
   local config_file="$1"
   local -n lc__config_ref="$2"
   if [[ -f "${config_file}" ]]; then
-    while read line; do
+    while IFS= read -r line; do
       if echo "${line}" | grep -q "="; then
         varname=$(echo "${line}" | cut -d '=' -f 1)
-        varvalue=$(echo "${line}" | cut -d '=' -f 2)
+        varvalue=$(echo "${line}" | cut -d '=' -f 2-)
         lc__config_ref[${varname}]=${varvalue}
       fi
-    done < ${config_file}
+    done < "${config_file}"
   fi
 }
 
@@ -79,10 +80,10 @@ write_config() {
 #### Common command line option handlers for upgrade.sh & install.sh ###
 version_option_handler() {
   if [[ "$1" = "auto" ]]; then
-    echo -e "\n\033[1mAuto-detecting latest Equilibria version tag..\033[0m"
+    echo -e "\n\033[1mAuto-detecting latest XEQM version tag...\033[0m"
     config[install_version]="$(get_latest_equilibria_version_number)"
   elif [[ "$1" = "master" || "$1" =~ ${version_regex} || "$1" =~ ${rev_hash_regex} ]]; then
-    echo -e "\n\033[1mUpgrading to manually set Equilibria branch/version/hash:\033[0m"
+    echo -e "\n\033[1mUsing manually set XEQM branch/version/hash:\033[0m"
     config[install_version]="$1"
   else
     echo -e "\033[0;33merror: Invalid --version value '$1'\033[0m\n"
@@ -122,6 +123,10 @@ inspect_time_services () {
     fi
   else
     echo -e "\033[0;33mWARNING: Clock NTP synchronisation could not be verified.\nPlease check and make sure this is working before continuing!\033[0m\n"
+    if [[ "${config[quiet_mode]:-0}" -eq 1 ]]; then
+      echo -e "\033[0;33mQuiet mode: continuing without NTP confirmation.\033[0m"
+      return 0
+    fi
     while true; do
       read -p $'\033[1mAre you sure you want to continue?\e[0m (NOT RECOMMENDED) [Y/N]: ' yn
       yn=${yn:-N}
@@ -222,9 +227,69 @@ default_ports_configured() {
 }
 
 get_latest_equilibria_version_number() {
-  git ls-remote --tags "${config[git_repository]}" 2>/dev/null | grep -o 'v.*' | sort -V | tail -1
+  local version
+  version="$(git ls-remote --tags "${config[git_repository]}" 2>/dev/null | grep -o 'v.*' | sort -V | tail -1)"
+  if [[ -z "${version}" ]]; then
+    printf "\033[0;31mFATAL\033[0m: Could not retrieve latest version from '%s'. Check network connectivity.\n" "${config[git_repository]}" >&2
+    exit 1
+  fi
+  echo "${version}"
 }
 
 version2num() {
   echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1, $2, $3, $4); }'
+}
+
+# prompt_menu <title> <nameref-result> <default-index> <option1> [option2 ...]
+# In quiet mode uses the default without prompting.
+prompt_menu() {
+  local title="$1"
+  local -n pm__result="$2"
+  local default="${3:-1}"
+  shift 3
+  local options=("$@")
+
+  if [[ "${config[quiet_mode]:-0}" -eq 1 ]]; then
+    pm__result="${default}"
+    return 0
+  fi
+
+  echo -e "\n\033[1m${title}\033[0m\n"
+  local idx=1
+  for option in "${options[@]}"; do
+    printf "  \033[1;33m[%d]\033[0m %s\n" "${idx}" "${option}"
+    idx=$((idx + 1))
+  done
+  echo ""
+
+  local choice
+  while true; do
+    read -rp "  Choice [${default}]: " choice
+    choice="${choice:-${default}}"
+    if [[ "${choice}" =~ ^[0-9]+$ && "${choice}" -ge 1 && "${choice}" -le "${#options[@]}" ]]; then
+      pm__result="${choice}"
+      return 0
+    fi
+    echo -e "  \033[0;33mPlease enter a number between 1 and ${#options[@]}\033[0m"
+  done
+}
+
+print_splash_screen() {
+  local subtitle="${1:-Service Node Installer}"
+  local ver="${2:-${xeqmnode_installer_version}}"
+  local inner="XEQM Labs  ·  ${subtitle}  ·  ${ver}"
+  local inner_len=${#inner}
+  local box_inner_width=54
+  local pad_left=$(( (box_inner_width - inner_len) / 2 ))
+  local pad_right=$(( box_inner_width - inner_len - pad_left ))
+  local border
+  border="$(printf '═%.0s' $(seq 1 ${box_inner_width}))"
+  echo ""
+  echo -e "\033[1;36m  ╔${border}╗\033[0m"
+  echo -e "\033[1;36m  ║\033[0m$(printf ' %.0s' $(seq 1 ${box_inner_width}))\033[1;36m║\033[0m"
+  printf "\033[1;36m  ║\033[0m%*s\033[1;37m%s\033[0m%*s\033[1;36m║\033[0m\n" \
+    "${pad_left}" "" "${inner}" "${pad_right}" ""
+  echo -e "\033[1;36m  ║\033[0m$(printf ' %.0s' $(seq 1 ${box_inner_width}))\033[1;36m║\033[0m"
+  echo -e "\033[1;36m  ╚${border}╝\033[0m"
+  echo ""
 }
