@@ -292,7 +292,7 @@ print_splash_screen() {
   echo ""
   echo -e "\033[1;36m  ╔${border}╗\033[0m"
   echo -e "\033[1;36m  ║\033[0m$(printf ' %.0s' $(seq 1 ${box_inner_width}))\033[1;36m║\033[0m"
-  printf "\033[1;36m  ║\033[0m%*s\033[1;37m%s\033[0m%*s\033[1;36m║\033[0m\n" \
+  printf "\033[1;36m  ║\033[0m%*s\033[1m%s\033[0m%*s\033[1;36m║\033[0m\n" \
     "${pad_left}" "" "${inner}" "${pad_right}" ""
   echo -e "\033[1;36m  ║\033[0m$(printf ' %.0s' $(seq 1 ${box_inner_width}))\033[1;36m║\033[0m"
   echo -e "\033[1;36m  ╚${border}╝\033[0m"

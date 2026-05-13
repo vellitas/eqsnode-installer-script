@@ -711,13 +711,10 @@ setup_running_user () {
 
 create_user_if_needed() {
   local user="$1"
-  # shellcheck disable=SC2154
   if ! id -u "${user}" >/dev/null 2>&1; then
+    sudo adduser --disabled-password --gecos "${user}" "${user}"
     if [[ -f "${script_basedir}/.onepasswd" ]]; then
-      sudo adduser --disabled-password --gecos "${user}" "${user}"
       sudo usermod -p "$(cat "${script_basedir}/.onepasswd")" "${user}"
-    else
-      sudo adduser --gecos "${user}" "${user}"
     fi
     sudo usermod -aG sudo "${user}"
   fi
