@@ -231,8 +231,7 @@ get_latest_equilibria_version_number() {
   local version
   version="$(git ls-remote --tags "${config[git_repository]}" 2>/dev/null \
     | awk -F'/' '{print $NF}' \
-    | grep '^core-v' \
-    | grep -v '\^{}' \
+    | grep -E '^core-v[0-9]+\.[0-9]+\.[0-9]+$' \
     | sort -V \
     | tail -1)"
   if [[ -z "${version}" ]]; then
