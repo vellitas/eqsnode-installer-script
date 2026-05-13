@@ -243,9 +243,9 @@ Options:
                                         Examples:   --user snode2
                                                     --user snode,snode2
 
-  -v --version [auto|[version/hash]]    Set Equilibria version tag with format 'v0.0.0'
+  -v --version [auto|[version/hash]]    Set XEQM version tag with format 'v0.0.0'
                                         or 'master' or git hash. Use 'auto' to upgrade
-                                        to the latest version tag.  If you do not know which
+                                        to the latest version tag. If you do not know which
                                         version to use choose 'auto' or remove --version
                                         option from command line
 

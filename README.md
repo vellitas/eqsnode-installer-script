@@ -1,99 +1,224 @@
-# Equilibria service node easy setup guide
+# XEQM Labs — Service Node Installer
 
-## Pull this script from Github (as root)
-#### As root? Yes, but do not worry! While the script needs to be run as root, the script will automatically create users that will run the service node(s).
-```
+Easy setup and management of XEQM service nodes on a single Linux server.
+
+---
+
+## Get the scripts (run as root)
+
+> The scripts must be run as root. They automatically create separate users to run each service node — you do not need to manage this yourself.
+
+```bash
 cd ~
 sudo apt -y install git
-git clone https://github.com/misterr-labs/eqsnode-installer-script
+git clone https://github.com/vellitas/eqsnode-installer-script
 cd eqsnode-installer-script
 ```
-#### Already pulled this script from Github before? Update it to the latest version:
-```
+
+**Already cloned before? Pull the latest:**
+
+```bash
 cd ~/eqsnode-installer-script
 git pull --force
 ```
 
-## Installation of a service node
-`bash install.sh --open-firewall`
+---
 
-#### It is recommended to install or upgrade with the option `--open-firewall` which will open the P2P in/out ports so the node can interact with other service nodes. 
+## Install a single service node
 
-#### While not required it is recommended to inspect the auto-magic behind the scenes first.
+```bash
+bash install.sh --open-firewall
+```
 
-`bash install.sh -i`
+`--open-firewall` automatically configures UFW or iptables to open all required ports. It is recommended for most setups.
 
-## Multi service node installation (one VPS or server)
+**Preview what the installer will do before running it:**
 
-#### Install multiple nodes with just one command:
+```bash
+bash install.sh -i
+```
 
-`bash install.sh --nodes 2 --open-firewall`
-#### Suggestion: have a look at the --one-passwd-file option in the Advanced features section
+---
 
-#### Note: while not required it is recommended to inspect the auto-magic behind the scenes first, to double check if everything looks good.
-`bash install.sh --nodes 2 -i`
-<br />
-## Build in help for install.sh and upgrade.sh
-#### Run the following to get a list of commands you can use:
-`bash install.sh --help`
+## Install multiple service nodes (one server)
 
-`bash upgrade.sh --help`
+```bash
+bash install.sh --nodes 2 --open-firewall
+```
 
-## Upgrading a service node
-#### For example to upgrade nodes ran by users `snode` and `snode2` to the latest officially released version:
-`bash upgrade.sh --user snode,snode2`
+> Tip: use `--one-passwd-file` (see Advanced section) to avoid typing passwords for each user.
 
-#### Or a more advanced version:
-`bash upgrade.sh --user snode,snode2 --open-firewall --set-daemon-log-level 0,stacktrace:FATAL`
+---
 
+## Blockchain seeding options
 
+When installing, you will be asked how to seed the blockchain. You can also pass it directly:
+
+| Option | Description |
+|---|---|
+| `--copy-blockchain bootstrap` | Download bootstrap from XEQM Labs (~15 min) — **recommended** |
+| `--copy-blockchain auto` | Copy from an existing node on this server |
+| `--copy-blockchain /home/snode/.equilibria` | Copy from a specific path |
+| `--copy-blockchain no` | Sync fresh from the network (many hours) |
+| `--copy-blockchain no,auto` | First node syncs fresh, remaining nodes copy from it |
+
+```bash
+bash install.sh --nodes 2 --copy-blockchain bootstrap --open-firewall
+```
+
+---
+
+## Quiet / non-interactive mode
+
+Pass all options up front and the installer will run without asking any questions:
+
+```bash
+bash install.sh --nodes 2 --copy-blockchain bootstrap --open-firewall --quiet
+```
+
+In quiet mode, blockchain defaults to `bootstrap` if `--copy-blockchain` is not specified.
+
+---
+
+## Upgrading service nodes
+
+Upgrade nodes running as users `snode` and `snode2` to the latest release:
+
+```bash
+bash upgrade.sh --user snode,snode2
+```
+
+With firewall and log level options:
+
+```bash
+bash upgrade.sh --user snode,snode2 --open-firewall --set-daemon-log-level 0,stacktrace:FATAL
+```
+
+---
+
+## Health check and diagnostics (doctor.sh)
+
+Scan all running nodes for problems and get a remediation plan:
+
+```bash
+bash doctor.sh
+```
+
+Auto-fix corrupt or stuck blockchains (copies from a healthy donor node or downloads bootstrap):
+
+```bash
+bash doctor.sh --auto-fix
+```
+
+---
+
+## Key transfer (transfer.sh)
+
+Move a service node identity between users or servers without losing registration.
+
+**List all nodes and their public keys:**
+
+```bash
+bash transfer.sh --list
+```
+
+**Export a node's key to a portable archive (for moving to another server):**
+
+```bash
+bash transfer.sh --export --user snode1 --output-dir /tmp
+```
+
+**Import the key on the destination server:**
+
+```bash
+bash transfer.sh --import --user snode2 --key-file /tmp/xeqm-key-snode1-20260513120000.tar.gz
+```
+
+**Transfer a key between two users on the same server:**
+
+```bash
+bash transfer.sh --transfer --from snode1 --to snode3
+```
+
+---
+
+## Firewall ports
+
+If you manage your own firewall (OPNsense, pfSense, cloud security groups, etc.), open these ports for each node:
+
+| Purpose | Default Port | Direction |
+|---|---|---|
+| P2P | 9230 | Inbound + Outbound |
+| Quorumnet (SN consensus) | 9232 | Inbound + Outbound |
+| OxenMQ | 9233 | Inbound + Outbound |
+
+For each additional node, add 100 to each port (node 2: 9330 / 9332 / 9333, etc.).
+
+---
 
 ## Advanced features
 
-### To install a node with a specific username. 
-#### (note: the auto-ports feature is enabled by default)
+### Custom username
 
-`bash install.sh --user mysnode10`
+```bash
+bash install.sh --user mysnode10
+```
 
-### Install multi-nodes with specific usernames and manual ports configs
-`bash install.sh --nodes 2 --user mysnode1,mysnode2 --ports p2p:9330+9430,rpc:9331+9431`
+### Multi-node with specific usernames and ports
 
-#### Or use the shorthand version
-`bash install.sh -n 2 -u mysnode1,mysnode2 -p p2p:9330+9430,rpc:9331+9431`
+```bash
+bash install.sh --nodes 2 --user mysnode1,mysnode2 --ports p2p:9330+9430,rpc:9331+9431
+```
 
-### Install a node using a copy af a specific blockchain
-#### While an existing blockchain is attempted to be auto-detected, it is possible that it will not detect a blockchain when there is one, or perhaps you want to specify a specific blockchain to use.
-`bash install.sh --copy-blockchain /home/snode/.equilibria`
+Shorthand:
 
-#### Or if you want a fresh blockchain download for each installed node
-`bash install.sh --copy-blockchain no`
+```bash
+bash install.sh -n 2 -u mysnode1,mysnode2 -p p2p:9330+9430,rpc:9331+9431
+```
 
-#### Or first node a fresh blockchain download, while the remaining nodes to install a copy of the first
-`bash install.sh --nodes 3 --copy-blockchain no,auto`
+### Install a specific version
 
-#### Note: using '--copy-blockchain no' will dramatically increase the installation time when installing multiple nodes
+```bash
+bash install.sh --nodes 2 --version v20.1.1
+```
 
-### Some other highlighted options:
-#### OPTION: `--set-daemon-log-level` which allows you to control the log level of the daemon to log less or more information. 
-`bash install.sh --nodes 3 --set-daemon-log-level 0,stacktrace:FATAL`
+```bash
+bash install.sh --nodes 2 --version 122d5f6a6
+```
 
-#### OPTION: `--version` installs/upgrades to a specific version, by version tag, 'master' branch or git hash code. For example:
-`bash install.sh --nodes 3 --version v20.1.1`
+Omitting `--version` installs the latest official release.
 
-`bash install.sh --nodes 3 --version 122d5f6a6`
+### Set daemon log level
 
-#### Omitting the `--version` option will install the latest officially released version (latest version tag).
+```bash
+bash install.sh --nodes 2 --set-daemon-log-level 0,stacktrace:FATAL
+```
 
-### Avoid repeated manual password input for service node users
-#### In case you install multiple nodes with the --nodes option, it can be annoying to input password and re-passwords many times. To avoid this, use below command to set one password a single time and all newly created service node users will use this one password (stored encrypted).
+### Shared password file (avoid repeated password prompts)
 
-`bash install.sh --one-passwd-file`
+Generate the password file once before installing:
 
-#### After the .onepasswd file is created you can start an installation like usual. You will not be prompted to enter passwords during the installation.
-#### Note: Future installations will also use this .onepasswd file. In case you want to type in passwords manually again, please remove this file:
+```bash
+bash install.sh --one-passwd-file
+```
 
-`rm ~/eqsnode-installer-script/.onepasswd`
+All subsequent installs will use this file — no password prompts. To go back to manual passwords, remove it:
 
-<br /><br />
+```bash
+rm ~/eqsnode-installer-script/.onepasswd
+```
 
+---
 
+## Built-in help
+
+```bash
+bash install.sh --help
+bash upgrade.sh --help
+bash doctor.sh --help
+bash transfer.sh --help
+```
+
+---
+
+For a full walkthrough written for non-technical users, see [USER_GUIDE.md](USER_GUIDE.md).
