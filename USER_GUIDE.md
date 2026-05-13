@@ -83,10 +83,10 @@ Log in to your server and run the following commands. Copy and paste them exactl
 
 ```bash
 # Download the scripts
-git clone https://github.com/misterr-labs/eqsnode-installer-script.git
+git clone https://github.com/vellitas/xeqm-node-installer-script.git
 
 # Move into the folder
-cd eqsnode-installer-script
+cd xeqm-node-installer-script
 ```
 
 You only need to do this once. For future upgrades the scripts handle themselves.
@@ -97,7 +97,7 @@ You only need to do this once. For future upgrades the scripts handle themselves
 
 ### Step 1 — Run the installer
 
-From inside the `eqsnode-installer-script` folder, run:
+From inside the `xeqm-node-installer-script` folder, run:
 
 ```bash
 bash install.sh

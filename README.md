@@ -11,14 +11,14 @@ Easy setup and management of XEQM service nodes on a single Linux server.
 ```bash
 cd ~
 sudo apt -y install git
-git clone https://github.com/vellitas/eqsnode-installer-script
-cd eqsnode-installer-script
+git clone https://github.com/vellitas/xeqm-node-installer-script
+cd xeqm-node-installer-script
 ```
 
 **Already cloned before? Pull the latest:**
 
 ```bash
-cd ~/eqsnode-installer-script
+cd ~/xeqm-node-installer-script
 git pull --force
 ```
 
@@ -205,7 +205,7 @@ bash install.sh --one-passwd-file
 All subsequent installs will use this file — no password prompts. To go back to manual passwords, remove it:
 
 ```bash
-rm ~/eqsnode-installer-script/.onepasswd
+rm ~/xeqm-node-installer-script/.onepasswd
 ```
 
 ---
