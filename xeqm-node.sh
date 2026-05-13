@@ -134,7 +134,7 @@ compile_and_move_binaries() {
   fi
 
   echo -e "\n\033[1mCompiling XEQM binaries...\033[0m"
-  make -j$(nproc) daemon
+  make -j$(nproc) xeqm-d
 
   echo -e "\n\033[1mMoving Equilibria binaries to installation directory...\033[0m"
   cd "$(get_make_release_base_dir)" && mv bin "${install_root_bin_dir}"
@@ -190,13 +190,13 @@ wait_daemon_start() {
 
    while [ $polling_time_passed -lt $timeout_time ]; do
      sleep 1
-     if ps aux | grep -q "[d]aemon --non-interactive --service-node" ; then
+     if ps aux | grep -q "[x]eqm-d --non-interactive --service-node" ; then
        break
      fi
      polling_time_passed=$((polling_time_passed + 1))
 
      if [[ $polling_time_passed -eq $timeout_time ]]; then
-       echo -e "\033[0;31mOops, the Equilibria daemon seems to be not started or crashed.\033[0m\nExiting service node installer\n"
+       echo -e "\033[0;31mOops, the XEQM daemon seems to be not started or crashed.\033[0m\nExiting service node installer\n"
        exit 1
      fi
    done
@@ -224,7 +224,7 @@ watch_daemon_status() {
   echo -e "\n\033[1mMonitoring blockchain download progress by daemon:\033[0m\n"
 
   while true; do
-    read blocks_done total_blocks perc <<< "$("${install_root_bin_dir}"/bin/daemon status ${port_params} | grep -o 'Height:.*' | sed -n 's/^Height: \([0-9]*\)\/\([0-9]*\) (\([0-9.]*\).*/\1 \2 \3/p')"
+    read blocks_done total_blocks perc <<< "$("${install_root_bin_dir}"/bin/xeqm-d status ${port_params} | grep -o 'Height:.*' | sed -n 's/^Height: \([0-9]*\)\/\([0-9]*\) (\([0-9.]*\).*/\1 \2 \3/p')"
 
     # skip output of odd total number of blocks like 0 or 1
     [[ "${total_blocks}" -lt 1000 ]] && continue
@@ -314,7 +314,7 @@ check_iptables_dependencies() {
 }
 
 prepare_sn() {
-  ~/bin/daemon prepare_sn ${port_params}
+  ~/bin/xeqm-d prepare_sn ${port_params}
 }
 
 start() {
@@ -324,7 +324,7 @@ start() {
 }
 
 status() {
-  ~/bin/daemon status ${port_params}
+  ~/bin/xeqm-d status ${port_params}
   #systemctl status "${service_name}"
 }
 
@@ -338,11 +338,11 @@ log() {
 }
 
 print_sn_key() {
-  ~/bin/daemon print_sn_key ${port_params}
+  ~/bin/xeqm-d print_sn_key ${port_params}
 }
 
 print_sn_status() {
-  ~/bin/daemon print_sn_status ${port_params}
+  ~/bin/xeqm-d print_sn_status ${port_params}
 }
 
 fork_update() {
@@ -352,7 +352,7 @@ fork_update() {
   git clone --recursive "${config[git_repository]}" equilibria && cd equilibria
   git submodule init && git submodule update
   git checkout "${config[install_version]}"
-  make
+  make -j$(nproc) xeqm-d
 
   stop_all_nodes
   sudo rm -Rf ~/bin

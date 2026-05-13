@@ -260,12 +260,12 @@ copy_binaries_option_handler() {
   local idx=1
   local option_value="$1"
 
-  if [[ -f "${option_value}/daemon" ]]; then
-      binaries_version="$("${option_value}"/daemon --version | grep -oP '(?<=\()+v[0-9.]+')"
+  if [[ -f "${option_value}/xeqm-d" ]]; then
+      binaries_version="$("${option_value}"/xeqm-d --version | grep -oP '(?<=\()+v[0-9.]+')"
 
-      # if version option is set to a specific version or auto (already resolved to latest version), check if daemon version matches this version
+      # if version option is set to a specific version or auto (already resolved to latest version), check if xeqm-d version matches this version
       if [[ "${command_options_set[version]}" -eq 1 && "${config[install_version]}" != "${binaries_version}" ]]; then
-        echo -e "\n\033[0;33merror: ${option_value}/daemon version '${binaries_version}' does not match version '${config[install_version]}'\033[0m\n"
+        echo -e "\n\033[0;33merror: ${option_value}/xeqm-d version '${binaries_version}' does not match version '${config[install_version]}'\033[0m\n"
         exit 1
       fi
 
@@ -274,7 +274,7 @@ copy_binaries_option_handler() {
         idx=$((idx + 1))
       done
   else
-    echo -e "\n\033[0;33merror: daemon not found in --copy-binaries directory '$1'\033[0m\n"
+    echo -e "\n\033[0;33merror: xeqm-d not found in --copy-binaries directory '$1'\033[0m\n"
     exit 1
   fi
 }
@@ -283,7 +283,7 @@ find_existing_binaries_on_server() {
   local -n febos__result="$1"
   local bin_dir
   for bin_dir in /home/snode*/bin; do
-    [[ -x "${bin_dir}/daemon" ]] && febos__result="${bin_dir}" && return 0
+    [[ -x "${bin_dir}/xeqm-d" ]] && febos__result="${bin_dir}" && return 0
   done
   febos__result=""
   return 0
@@ -369,9 +369,9 @@ download_release_binaries() {
   rm -f "${tmp_dir}/release.archive"
 
   local daemon_path
-  daemon_path="$(find "${tmp_dir}" -name "daemon" -type f | head -1)"
+  daemon_path="$(find "${tmp_dir}" -name "xeqm-d" -type f | head -1)"
   if [[ -z "${daemon_path}" ]]; then
-    echo -e "\033[0;31merror\033[0m: daemon binary not found in downloaded release." >&2
+    echo -e "\033[0;31merror\033[0m: xeqm-d binary not found in downloaded release." >&2
     rm -rf "${tmp_dir}"; exit 1
   fi
 
@@ -392,10 +392,10 @@ prepare_node1_binaries() {
     bins_path="$(download_release_binaries)"
     copy_binaries_to_directory "${bins_path}" "${target_dir}"
     rm -rf "$(dirname "${bins_path}")"
-  elif [[ -n "${binary_source}" && -x "${binary_source}/daemon" ]]; then
+  elif [[ -n "${binary_source}" && -x "${binary_source}/xeqm-d" ]]; then
     copy_binaries_to_directory "${binary_source}" "${target_dir}"
   else
-    echo -e "\033[0;31merror\033[0m: Binary source '${binary_source}' is not valid or daemon not found."
+    echo -e "\033[0;31merror\033[0m: Binary source '${binary_source}' is not valid or xeqm-d not found."
     exit 1
   fi
 }
@@ -567,7 +567,7 @@ validate_manual_users_and_set_config_if_valid() {
 }
 
 running_user_has_active_daemon() {
-   [[ "$(sudo ps aux | egrep '[b]in/daemon.*--service-node' | gawk '{ print $1 }' | natsort | uniq | grep -o "^${1}$" | wc -l)" -gt 0 ]]
+   [[ "$(sudo ps aux | egrep '[b]in/xeqm-d.*--service-node' | gawk '{ print $1 }' | natsort | uniq | grep -o "^${1}$" | wc -l)" -gt 0 ]]
 }
 
 ports_option_handler() {
