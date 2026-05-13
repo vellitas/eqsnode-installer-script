@@ -102,15 +102,13 @@ discover_available_usernames() {
     local idx=1
     local suffix=1
 
-    candidate_username=${username_base}
-    while true ; do
+    while true; do
+      local candidate_username="${username_base}${suffix}"
       if ! id -u "${candidate_username}" >/dev/null 2>&1; then
         result["${idx}"]="${candidate_username}"
         idx=$((idx + 1))
-
-        [[ "${idx}" -gt "${number_of_usernames}" ]] && break;
+        [[ "${idx}" -gt "${number_of_usernames}" ]] && break
       fi
       suffix=$((suffix + 1))
-      candidate_username="${username_base}${suffix}"
     done
 }

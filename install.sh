@@ -94,7 +94,13 @@ set_config_and_execute_info_commands() {
   [[ "${command_options_set[one_passwd_file]}" -eq 1 ]] && one_password_file_option_handler && exit 0
 
   # set options first that effect other options and the parsing of their option value(s)
-  if [[ "${command_options_set[nodes]}" -eq 1 ]]; then nodes_option_handler "${nodes_option_value}"; else nodes_option_handler 1; fi
+  if [[ "${command_options_set[nodes]}" -eq 1 ]]; then
+    nodes_option_handler "${nodes_option_value}"
+  elif [[ "${command_options_set[quiet]}" -eq 1 ]]; then
+    nodes_option_handler 1
+  else
+    prompt_nodes_count
+  fi
 
   # info commands, exit 0 must be first listed options in this function
   [[ "${command_options_set[inspect_auto_magic]}" -eq 1 ]] && inspect_auto_magic_option_handler && exit 0
@@ -131,6 +137,19 @@ validate_parsed_command_line_args() {
     "help"
   )
   validate_command_line_option_combinations valid_option_combinations
+}
+
+prompt_nodes_count() {
+  local count
+  while true; do
+    read -rp $'\n\033[1mHow many service nodes would you like to install?\e[0m [1]: ' count
+    count="${count:-1}"
+    if [[ "${count}" =~ ^[0-9]+$ && "${count}" -ge 1 ]]; then
+      nodes_option_handler "${count}"
+      return 0
+    fi
+    echo -e "  \033[0;33mPlease enter a number (1 or more)\033[0m"
+  done
 }
 
 nodes_option_handler() {
