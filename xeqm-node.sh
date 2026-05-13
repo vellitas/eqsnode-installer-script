@@ -133,8 +133,8 @@ compile_and_move_binaries() {
     return 0
   fi
 
-  echo -e "\n\033[1mCompiling Equilibria binaries...\033[0m"
-  make
+  echo -e "\n\033[1mCompiling XEQM binaries...\033[0m"
+  make -j$(nproc) daemon
 
   echo -e "\n\033[1mMoving Equilibria binaries to installation directory...\033[0m"
   cd "$(get_make_release_base_dir)" && mv bin "${install_root_bin_dir}"
