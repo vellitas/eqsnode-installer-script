@@ -286,7 +286,7 @@ find_existing_binaries_on_server() {
     [[ -x "${bin_dir}/daemon" ]] && febos__result="${bin_dir}" && return 0
   done
   febos__result=""
-  return 1
+  return 0
 }
 
 prompt_binary_source() {
